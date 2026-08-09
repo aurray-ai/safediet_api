@@ -1,0 +1,13 @@
+{
+  "python_version": "3.12",
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "meal_conversation": "./app/agents/meal_conversation/studio/meal_conversation_studio.py:meal_conversation_graph",
+    "meal_planner": "./app/agents/meal_conversation/studio/meal_conversation_studio.py:meal_planner_graph",
+    "order_agent": "./app/agents/meal_conversation/studio/meal_conversation_studio.py:order_agent_graph",
+    "chef_agent": "./app/agents/meal_conversation/studio/meal_conversation_studio.py:chef_agent_graph"
+  },
+  "env": "./.env"
+}
