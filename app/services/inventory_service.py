@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from app.models.grocery import CountryCode, GroceryProduct
 from app.models.inventory import DeliveryFeeRule, InventoryAdjustment, InventoryItem
+from app.repositories.discount_repository import DiscountRepository
 from app.repositories.grocery_repository import GroceryRepository
 from app.repositories.inventory_repository import InventoryRepository
 from app.schemas.inventory import (
@@ -17,7 +18,7 @@ from app.schemas.inventory import (
     DeliveryFeeRuleResponse,
     DeliveryFeeRuleUpdateRequest,
 )
-from app.services.pricing import apply_category_discount
+from app.services.pricing import apply_discount
 
 
 class InventoryNotFoundError(Exception):
@@ -42,10 +43,12 @@ class InventoryService:
         *,
         inventory_repository: InventoryRepository,
         grocery_repository: GroceryRepository,
+        discount_repository: DiscountRepository,
         default_store_id: str,
     ) -> None:
         self._inventory_repository = inventory_repository
         self._grocery_repository = grocery_repository
+        self._discount_repository = discount_repository
         self._default_store_id = default_store_id
 
     def ensure_seed_inventory_defaults(self) -> None:
@@ -282,12 +285,12 @@ class InventoryService:
         base_price_minor = self.resolve_unit_price_minor(product=product, currency=currency)
 
         discount_percent = None
-        if is_subscriber:
-            category = self._grocery_repository.get_category(product.category_id)
-            if category is not None:
-                discount_percent = category.discount_percent
+        if is_subscriber and product.discount_id is not None:
+            discount = self._discount_repository.get_discount(product.discount_id)
+            if discount is not None:
+                discount_percent = discount.percent
 
-        unit_price_minor, discount_percent_applied = apply_category_discount(base_price_minor, discount_percent)
+        unit_price_minor, discount_percent_applied = apply_discount(base_price_minor, discount_percent)
         return ResolvedMemberPrice(
             base_price_minor=base_price_minor,
             unit_price_minor=unit_price_minor,

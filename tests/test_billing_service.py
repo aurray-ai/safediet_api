@@ -275,6 +275,33 @@ class BillingServiceTests(unittest.TestCase):
         self.assertEqual(response.wallet.available_balance_minor, 0)
         self.assertEqual(response.recent_transactions, [])
 
+    def test_overview_reports_not_premium_for_stale_canceled_subscription(self) -> None:
+        # Simulates the flag going stale: is_premium is still True from before
+        # cancellation, but status has already moved to CANCELED. The response
+        # must not let the account keep member pricing off a stale flag.
+        self.subscription_repo.items[self.user.id] = SubscriptionAccount(
+            id=f"sub-{self.user.id}",
+            user_id=self.user.id,
+            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY,
+            status=SubscriptionStatus.CANCELED,
+            provider="stripe",
+            price_minor=900,
+            currency="GBP",
+            is_premium=True,
+            started_at=utc_now(),
+            expires_at=utc_now(),
+            renewal_at=None,
+            original_transaction_id="orig-1",
+            latest_transaction_id="latest-1",
+            provider_payload={},
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+
+        response = self.service.get_overview(current_user=self.user)
+
+        self.assertFalse(response.subscription.is_premium)
+
     def test_topup_creates_ledger_credit_and_updates_wallet(self) -> None:
         response = self.service.topup_wallet(
             current_user=self.user,

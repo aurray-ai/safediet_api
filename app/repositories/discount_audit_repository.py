@@ -8,34 +8,32 @@ from pymongo import DESCENDING
 from pymongo.collection import Collection
 
 
-class CategoryDiscountAuditRepository:
+class DiscountAuditRepository:
     def __init__(self, collection: Collection[dict[str, Any]]) -> None:
         self._collection = collection
 
     def append(
         self,
         *,
-        category_id: str,
+        discount_id: str,
         action: str,
-        previous_percent: float | None,
-        new_percent: float | None,
+        details: dict[str, Any],
         actor_user_id: str,
     ) -> dict[str, Any]:
         document = {
             "_id": uuid4().hex,
-            "category_id": category_id,
+            "discount_id": discount_id,
             "action": action,
-            "previous_percent": previous_percent,
-            "new_percent": new_percent,
+            "details": dict(details),
             "actor_user_id": actor_user_id,
             "created_at": datetime.now(timezone.utc),
         }
         self._collection.insert_one(document)
         return document
 
-    def list_for_category(self, *, category_id: str) -> list[dict[str, Any]]:
+    def list_for_discount(self, *, discount_id: str) -> list[dict[str, Any]]:
         return list(
-            self._collection.find({"category_id": category_id}).sort(
+            self._collection.find({"discount_id": discount_id}).sort(
                 [("created_at", DESCENDING), ("_id", DESCENDING)]
             )
         )

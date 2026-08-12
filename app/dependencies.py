@@ -21,9 +21,11 @@ from app.repositories.promotion_draft_repository import PromotionDraftRepository
 from app.repositories.refund_repository import RefundRepository
 from app.repositories.subscription_account_repository import SubscriptionAccountRepository
 from app.repositories.cached_meal_conversation_repository import CachedMealConversationRepository
+from app.repositories.cached_discount_repository import CachedDiscountRepository
 from app.repositories.cached_grocery_repository import CachedGroceryRepository
 from app.repositories.cached_meal_repository import CachedMealRepository
-from app.repositories.category_discount_audit_repository import CategoryDiscountAuditRepository
+from app.repositories.discount_audit_repository import DiscountAuditRepository
+from app.repositories.discount_repository import DiscountRepository
 from app.repositories.grocery_repository import GroceryRepository
 from app.repositories.kitchen_repository import KitchenRepository
 from app.repositories.meal_cart_repository import MealCartRepository
@@ -52,7 +54,6 @@ from app.services.admin_meal_service import AdminMealService
 from app.services.admin_promotion_service import AdminPromotionService
 from app.services.auth_service import AuthService
 from app.services.admin_grocery_service import AdminGroceryService
-from app.services.category_discount_service import CategoryDiscountService
 from app.services.address_service import AddressService
 from app.services.admin_customer_service import AdminCustomerService
 from app.services.billing_service import BillingService
@@ -68,7 +69,10 @@ from app.services.email_service import EmailService, build_email_sender
 from app.services.notification_copy_service import NotificationCopyService
 from app.services.order_fulfillment_communication_service import OrderFulfillmentCommunicationService
 from app.services.subscription_communication_service import SubscriptionCommunicationService
+from app.services.discount_service import DiscountService
+from app.services.grocery_catalog_embedding_service import GroceryCatalogEmbeddingService
 from app.services.grocery_service import GroceryService
+from app.services.grocery_similar_products_service import GrocerySimilarProductsService
 from app.services.household_budgeting_service import HouseholdBudgetingService
 from app.services.household_communication_service import HouseholdCommunicationService
 from app.services.household_service import HouseholdService
@@ -175,6 +179,17 @@ def get_grocery_repository() -> GroceryRepository:
     )
     settings = get_settings()
     return CachedGroceryRepository(
+        base_repository=base_repository,
+        cache=get_redis_cache(),
+        entity_ttl_seconds=settings.cache_entity_ttl_seconds,
+        query_ttl_seconds=settings.cache_query_ttl_seconds,
+    )
+
+
+def get_discount_repository() -> DiscountRepository:
+    base_repository = DiscountRepository(mongo_manager.grocery_discounts_collection())
+    settings = get_settings()
+    return CachedDiscountRepository(
         base_repository=base_repository,
         cache=get_redis_cache(),
         entity_ttl_seconds=settings.cache_entity_ttl_seconds,
@@ -330,8 +345,27 @@ def get_email_service() -> EmailService:
 
 def get_grocery_service(
     grocery_repository: GroceryRepository = Depends(get_grocery_repository),
+    discount_repository: DiscountRepository = Depends(get_discount_repository),
 ) -> GroceryService:
-    return GroceryService(grocery_repository=grocery_repository)
+    return GroceryService(grocery_repository=grocery_repository, discount_repository=discount_repository)
+
+
+def get_discount_audit_repository() -> DiscountAuditRepository:
+    return DiscountAuditRepository(mongo_manager.grocery_discount_audit_logs_collection())
+
+
+def get_discount_service(
+    discount_repository: DiscountRepository = Depends(get_discount_repository),
+    grocery_repository: GroceryRepository = Depends(get_grocery_repository),
+    audit_repository: DiscountAuditRepository = Depends(get_discount_audit_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
+) -> DiscountService:
+    return DiscountService(
+        discount_repository=discount_repository,
+        grocery_repository=grocery_repository,
+        audit_repository=audit_repository,
+        user_repository=user_repository,
+    )
 
 
 def _get_push_notification_service_dependency(
@@ -408,23 +442,37 @@ def get_household_budgeting_service(
     )
 
 
+def get_grocery_search_embedding_service() -> MealSearchEmbeddingService:
+    settings = get_settings()
+    return MealSearchEmbeddingService(
+        api_key=(
+            settings.openai_api_key.get_secret_value()
+            if settings.openai_api_key is not None
+            else None
+        ),
+        model_name=settings.openai_grocery_search_embedding_model,
+        timeout_seconds=settings.openai_grocery_search_embedding_timeout_seconds,
+    )
+
+
+def get_grocery_catalog_embedding_service(
+    grocery_repository: GroceryRepository = Depends(get_grocery_repository),
+) -> GroceryCatalogEmbeddingService:
+    return GroceryCatalogEmbeddingService(
+        grocery_repository=grocery_repository,
+        embedding_service=get_grocery_search_embedding_service(),
+    )
+
+
 def get_admin_grocery_service(
     grocery_repository: GroceryRepository = Depends(get_grocery_repository),
+    grocery_catalog_embedding_service: GroceryCatalogEmbeddingService = Depends(
+        get_grocery_catalog_embedding_service
+    ),
 ) -> AdminGroceryService:
-    return AdminGroceryService(grocery_repository=grocery_repository)
-
-
-def get_category_discount_audit_repository() -> CategoryDiscountAuditRepository:
-    return CategoryDiscountAuditRepository(mongo_manager.category_discount_audit_logs_collection())
-
-
-def get_category_discount_service(
-    grocery_repository: GroceryRepository = Depends(get_grocery_repository),
-    audit_repository: CategoryDiscountAuditRepository = Depends(get_category_discount_audit_repository),
-) -> CategoryDiscountService:
-    return CategoryDiscountService(
+    return AdminGroceryService(
         grocery_repository=grocery_repository,
-        audit_repository=audit_repository,
+        grocery_catalog_embedding_service=grocery_catalog_embedding_service,
     )
 
 
@@ -596,11 +644,13 @@ def get_address_service(
 def get_inventory_service(
     inventory_repository: InventoryRepository = Depends(get_inventory_repository),
     grocery_repository: GroceryRepository = Depends(get_grocery_repository),
+    discount_repository: DiscountRepository = Depends(get_discount_repository),
     settings: Settings = Depends(get_settings),
 ) -> InventoryService:
     return InventoryService(
         inventory_repository=inventory_repository,
         grocery_repository=grocery_repository,
+        discount_repository=discount_repository,
         default_store_id=settings.grocery_default_store_id,
     )
 

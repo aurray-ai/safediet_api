@@ -83,6 +83,12 @@ class MongoDatabaseManager:
     def grocery_products_collection(self) -> Collection[dict[str, Any]]:
         return self.database()["grocery_products"]
 
+    def grocery_discounts_collection(self) -> Collection[dict[str, Any]]:
+        return self.database()["grocery_discounts"]
+
+    def grocery_discount_audit_logs_collection(self) -> Collection[dict[str, Any]]:
+        return self.database()["grocery_discount_audit_logs"]
+
     def grocery_inventory_items_collection(self) -> Collection[dict[str, Any]]:
         return self.database()["grocery_inventory_items"]
 
@@ -188,9 +194,6 @@ class MongoDatabaseManager:
     def promotion_audit_logs_collection(self) -> Collection[dict[str, Any]]:
         return self.database()["promotion_audit_logs"]
 
-    def category_discount_audit_logs_collection(self) -> Collection[dict[str, Any]]:
-        return self.database()["category_discount_audit_logs"]
-
     def admin_customer_audit_logs_collection(self) -> Collection[dict[str, Any]]:
         return self.database()["admin_customer_audit_logs"]
 
@@ -282,6 +285,18 @@ class MongoDatabaseManager:
         self.grocery_products_collection().create_index(
             [("product", "text"), ("product_tags", "text")],
             name="ix_grocery_products_text",
+        )
+        self.grocery_products_collection().create_index(
+            [("discount_id", ASCENDING)],
+            name="ix_grocery_products_discount_id",
+        )
+        self.grocery_discounts_collection().create_index(
+            [("created_at", ASCENDING)],
+            name="ix_grocery_discounts_created_at",
+        )
+        self.grocery_discount_audit_logs_collection().create_index(
+            [("discount_id", ASCENDING), ("created_at", DESCENDING)],
+            name="ix_grocery_discount_audit_logs_discount_created",
         )
         self.measurement_units_collection().create_index(
             [("code", ASCENDING)],
@@ -641,10 +656,6 @@ class MongoDatabaseManager:
         self.promotion_audit_logs_collection().create_index(
             [("campaign_id", ASCENDING), ("created_at", DESCENDING)],
             name="ix_promotion_audit_logs_campaign_created",
-        )
-        self.category_discount_audit_logs_collection().create_index(
-            [("category_id", ASCENDING), ("created_at", DESCENDING)],
-            name="ix_category_discount_audit_logs_category_created",
         )
         self.admin_customer_audit_logs_collection().create_index(
             [("user_id", ASCENDING), ("created_at", DESCENDING)],

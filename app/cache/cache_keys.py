@@ -62,3 +62,11 @@ def grocery_category(category_id: str) -> str:
 def grocery_categories(*, include_inactive: bool) -> str:
     suffix = "all" if include_inactive else "active"
     return f"grocery:categories:{suffix}"
+
+
+def grocery_discount(discount_id: str) -> str:
+    return f"grocery:discount:{discount_id}"
+
+
+def grocery_discounts() -> str:
+    return "grocery:discounts"

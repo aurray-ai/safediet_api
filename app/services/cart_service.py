@@ -11,6 +11,7 @@ from app.repositories.cart_repository import CartRepository
 from app.repositories.grocery_repository import GroceryRepository
 from app.repositories.inventory_repository import InventoryRepository
 from app.repositories.saved_meal_plan_repository import SavedMealPlanRepository
+from app.models.billing import SubscriptionStatus
 from app.repositories.subscription_account_repository import SubscriptionAccountRepository
 from app.schemas.cart import (
     CartAddPlanItemsResponse,
@@ -235,7 +236,14 @@ class CartService:
 
     def _is_subscriber(self, user_id: str) -> bool:
         account = self._subscription_account_repository.get_by_user_id(user_id=user_id)
-        return account is not None and account.is_premium
+        if account is None or not account.is_premium:
+            return False
+        # A canceled/expired status unambiguously means the account is not premium,
+        # regardless of what is_premium was last persisted as. This guards checkout
+        # pricing against is_premium going stale when the source that's supposed to
+        # flip it (a Stripe webhook, or the client's App Store entitlement sync)
+        # never fires.
+        return account.status not in (SubscriptionStatus.CANCELED, SubscriptionStatus.EXPIRED)
 
     @staticmethod
     def _estimate_pack_quantity(*, required_quantity: float, unit: str, product_id: str) -> int:

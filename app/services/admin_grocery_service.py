@@ -17,6 +17,10 @@ from app.schemas.admin_grocery import (
     AdminNutritionSpecPayload,
 )
 from app.schemas.grocery import GroceryCategoryResponse
+from app.services.grocery_catalog_embedding_service import (
+    GroceryCatalogEmbeddingError,
+    GroceryCatalogEmbeddingService,
+)
 
 
 class AdminGroceryCategoryNotFoundError(Exception):
@@ -36,8 +40,13 @@ class AdminGroceryValidationError(Exception):
 
 
 class AdminGroceryService:
-    def __init__(self, grocery_repository: GroceryRepository) -> None:
+    def __init__(
+        self,
+        grocery_repository: GroceryRepository,
+        grocery_catalog_embedding_service: GroceryCatalogEmbeddingService | None = None,
+    ) -> None:
         self._grocery_repository = grocery_repository
+        self._grocery_catalog_embedding_service = grocery_catalog_embedding_service
 
     def get_metadata(self) -> AdminMetadataResponse:
         categories = [
@@ -101,10 +110,13 @@ class AdminGroceryService:
         self._ensure_category_exists(payload.category_id)
         product_id = self._generate_product_id(payload.product)
         self._validate_product_payload(payload)
+        payload_kwargs = self._payload_kwargs(payload)
+        embedding_payload = self._build_embedding_payload(payload_kwargs)
         try:
             product = self._grocery_repository.create_product(
                 product_id=product_id,
-                **self._payload_kwargs(payload),
+                **payload_kwargs,
+                **embedding_payload,
             )
         except DuplicateKeyError as exc:
             raise AdminGroceryProductAlreadyExistsError from exc
@@ -118,9 +130,12 @@ class AdminGroceryService:
     ) -> AdminGroceryProductResponse:
         self._ensure_category_exists(payload.category_id)
         self._validate_product_payload(payload)
+        payload_kwargs = self._payload_kwargs(payload)
+        embedding_payload = self._build_embedding_payload(payload_kwargs)
         product = self._grocery_repository.update_product(
             product_id=product_id,
-            **self._payload_kwargs(payload),
+            **payload_kwargs,
+            **embedding_payload,
         )
         if product is None:
             raise AdminGroceryProductNotFoundError
@@ -156,6 +171,17 @@ class AdminGroceryService:
         if category is None:
             raise AdminGroceryCategoryNotFoundError
         return category
+
+    def _build_embedding_payload(self, payload_kwargs: dict[str, object]) -> dict[str, object]:
+        if self._grocery_catalog_embedding_service is None:
+            return {}
+        search_document = self._grocery_repository.build_search_document(payload_kwargs)
+        try:
+            return self._grocery_catalog_embedding_service.create_embedding_payload(
+                search_document=search_document
+            )
+        except GroceryCatalogEmbeddingError:
+            return {}
 
     @staticmethod
     def _generate_product_id(product_name: str) -> str:

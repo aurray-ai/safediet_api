@@ -3,9 +3,9 @@ from fastapi import APIRouter
 from app.core.config import get_settings
 from app.api.v1.endpoints.admin_cache import router as admin_cache_router
 from app.api.v1.endpoints.admin_customers import router as admin_customers_router
+from app.api.v1.endpoints.admin_discounts import router as admin_discounts_router
 from app.api.v1.endpoints.admin_fulfillment import router as admin_fulfillment_router
 from app.api.v1.endpoints.admin_groceries import router as admin_groceries_router
-from app.api.v1.endpoints.admin_grocery_category_discounts import router as admin_grocery_category_discounts_router
 from app.api.v1.endpoints.admin_grocery_orders import router as admin_grocery_orders_router
 from app.api.v1.endpoints.admin_inventory import router as admin_inventory_router
 from app.api.v1.endpoints.admin_meal_orders import router as admin_meal_orders_router
@@ -75,9 +75,9 @@ api_router.include_router(realtime_router, prefix=settings.api_v1_prefix)
 api_router.include_router(push_devices_router, prefix=settings.api_v1_prefix)
 api_router.include_router(admin_cache_router, prefix=settings.api_v1_prefix)
 api_router.include_router(admin_customers_router, prefix=settings.api_v1_prefix)
+api_router.include_router(admin_discounts_router, prefix=settings.api_v1_prefix)
 api_router.include_router(admin_fulfillment_router, prefix=settings.api_v1_prefix)
 api_router.include_router(admin_groceries_router, prefix=settings.api_v1_prefix)
-api_router.include_router(admin_grocery_category_discounts_router, prefix=settings.api_v1_prefix)
 api_router.include_router(admin_inventory_router, prefix=settings.api_v1_prefix)
 api_router.include_router(admin_grocery_orders_router, prefix=settings.api_v1_prefix)
 api_router.include_router(admin_meal_orders_router, prefix=settings.api_v1_prefix)

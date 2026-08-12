@@ -72,7 +72,15 @@ class GroceryCategory:
     is_active: bool
     created_at: datetime
     updated_at: datetime
-    discount_percent: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GroceryDiscount:
+    id: str
+    label: str
+    percent: float
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,3 +118,4 @@ class GroceryProduct:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    discount_id: str | None = None
