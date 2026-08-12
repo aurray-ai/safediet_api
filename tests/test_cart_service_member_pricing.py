@@ -4,8 +4,9 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from app.models.billing import SubscriptionStatus
 from app.models.cart import Cart, CartItem, CartItemPricingState, CartStatus
-from app.models.grocery import CountryCode, CountryPrice, CurrencyCode, GroceryCategory, GroceryCategorySlug, GroceryProduct
+from app.models.grocery import CountryCode, CountryPrice, CurrencyCode, GroceryDiscount, GroceryProduct
 from app.models.user import User, UserType
 from app.schemas.cart import CartItemUpsertRequest
 from app.services.cart_service import CartService
@@ -28,24 +29,18 @@ def build_user() -> User:
     )
 
 
-def build_category(*, discount_percent: float | None) -> GroceryCategory:
+def build_discount(*, discount_id: str = "disc-1", percent: float) -> GroceryDiscount:
     now = utc_now()
-    return GroceryCategory(
-        id="cat-1",
-        slug=GroceryCategorySlug.PROTEIN,
-        name="Protein",
-        icon_name="protein",
-        img_url="",
-        description="",
-        sort_order=1,
-        is_active=True,
+    return GroceryDiscount(
+        id=discount_id,
+        label=f"{percent:g}% Off",
+        percent=percent,
         created_at=now,
         updated_at=now,
-        discount_percent=discount_percent,
     )
 
 
-def build_product(*, amount: float = 10.0) -> GroceryProduct:
+def build_product(*, amount: float = 10.0, discount_id: str | None = "disc-1") -> GroceryProduct:
     now = utc_now()
     return GroceryProduct(
         id="product-1",
@@ -71,13 +66,13 @@ def build_product(*, amount: float = 10.0) -> GroceryProduct:
         is_active=True,
         created_at=now,
         updated_at=now,
+        discount_id=discount_id,
     )
 
 
 class StubGroceryRepository:
-    def __init__(self, *, product: GroceryProduct, category: GroceryCategory) -> None:
+    def __init__(self, *, product: GroceryProduct) -> None:
         self._product = product
-        self._category = category
 
     def get_product(self, product_id: str):
         return self._product if product_id == self._product.id else None
@@ -85,8 +80,13 @@ class StubGroceryRepository:
     def get_product_by_id(self, product_id: str):
         return self.get_product(product_id)
 
-    def get_category(self, category_id: str):
-        return self._category if category_id == self._category.id else None
+
+class StubDiscountRepository:
+    def __init__(self, *, discount: GroceryDiscount | None) -> None:
+        self._discount = discount
+
+    def get_discount(self, discount_id: str):
+        return self._discount if self._discount is not None and self._discount.id == discount_id else None
 
 
 class StubInventoryRepository:
@@ -174,18 +174,20 @@ class StubSavedMealPlanRepository:
 
 
 class StubSubscriptionAccountRepository:
-    def __init__(self, *, is_premium: bool) -> None:
+    def __init__(self, *, is_premium: bool, status: SubscriptionStatus | None = None) -> None:
         self._is_premium = is_premium
+        self._status = status or (SubscriptionStatus.ACTIVE if is_premium else SubscriptionStatus.INACTIVE)
 
     def get_by_user_id(self, *, user_id: str):
-        return SimpleNamespace(is_premium=self._is_premium)
+        return SimpleNamespace(is_premium=self._is_premium, status=self._status)
 
 
-def build_service(*, product, category, inventory_item, is_premium: bool):
-    grocery_repository = StubGroceryRepository(product=product, category=category)
+def build_service(*, product, discount, inventory_item, is_premium: bool, subscription_status: SubscriptionStatus | None = None):
+    grocery_repository = StubGroceryRepository(product=product)
     inventory_service = InventoryService(
         inventory_repository=StubInventoryRepository(inventory_item),
         grocery_repository=grocery_repository,
+        discount_repository=StubDiscountRepository(discount=discount),
         default_store_id="main_store",
     )
     cart_repository = StubCartRepository()
@@ -196,7 +198,9 @@ def build_service(*, product, category, inventory_item, is_premium: bool):
         address_repository=object(),
         inventory_service=inventory_service,
         saved_meal_plan_repository=StubSavedMealPlanRepository(),
-        subscription_account_repository=StubSubscriptionAccountRepository(is_premium=is_premium),
+        subscription_account_repository=StubSubscriptionAccountRepository(
+            is_premium=is_premium, status=subscription_status
+        ),
         default_store_id="main_store",
         default_currency="GBP",
         free_delivery_subtotal_minor=0,
@@ -220,9 +224,9 @@ def build_inventory_item() -> SimpleNamespace:
 class CartServiceMemberPricingTests(unittest.TestCase):
     def test_add_item_as_subscriber_stamps_discounted_price(self) -> None:
         product = build_product(amount=10.0)
-        category = build_category(discount_percent=10.0)
+        discount = build_discount(percent=10.0)
         service, _ = build_service(
-            product=product, category=category, inventory_item=build_inventory_item(), is_premium=True
+            product=product, discount=discount, inventory_item=build_inventory_item(), is_premium=True
         )
 
         response = service.upsert_item(
@@ -235,11 +239,36 @@ class CartServiceMemberPricingTests(unittest.TestCase):
         self.assertEqual(900, item.current_unit_price_minor)
         self.assertEqual(10.0, item.discount_percent_applied)
 
+    def test_add_item_with_stale_premium_flag_but_canceled_status_pays_base_price(self) -> None:
+        # Reproduces the reported bug: is_premium is still True from before the
+        # subscription was canceled (e.g. a missed Stripe webhook left it stale),
+        # but status has already moved to CANCELED. The charged price must not
+        # keep the member discount off that stale flag.
+        product = build_product(amount=10.0)
+        discount = build_discount(percent=10.0)
+        service, _ = build_service(
+            product=product,
+            discount=discount,
+            inventory_item=build_inventory_item(),
+            is_premium=True,
+            subscription_status=SubscriptionStatus.CANCELED,
+        )
+
+        response = service.upsert_item(
+            current_user=build_user(),
+            payload=CartItemUpsertRequest(product_id="product-1", quantity=1),
+        )
+
+        item = response.items[0]
+        self.assertEqual(1000, item.base_price_minor)
+        self.assertEqual(1000, item.current_unit_price_minor)
+        self.assertEqual(0.0, item.discount_percent_applied)
+
     def test_add_item_as_non_subscriber_pays_base_price(self) -> None:
         product = build_product(amount=10.0)
-        category = build_category(discount_percent=10.0)
+        discount = build_discount(percent=10.0)
         service, _ = build_service(
-            product=product, category=category, inventory_item=build_inventory_item(), is_premium=False
+            product=product, discount=discount, inventory_item=build_inventory_item(), is_premium=False
         )
 
         response = service.upsert_item(
@@ -254,21 +283,22 @@ class CartServiceMemberPricingTests(unittest.TestCase):
 
     def test_reprice_reflects_discount_change_since_item_was_added(self) -> None:
         product = build_product(amount=10.0)
-        category = build_category(discount_percent=10.0)
+        discount = build_discount(percent=10.0)
         service, cart_repository = build_service(
-            product=product, category=category, inventory_item=build_inventory_item(), is_premium=True
+            product=product, discount=discount, inventory_item=build_inventory_item(), is_premium=True
         )
         service.upsert_item(
             current_user=build_user(),
             payload=CartItemUpsertRequest(product_id="product-1", quantity=1),
         )
 
-        # Category discount increases after the item was added to the cart.
-        richer_category = build_category(discount_percent=20.0)
-        service._grocery_repository = StubGroceryRepository(product=product, category=richer_category)
+        # The discount's percent increases after the item was added to the cart.
+        richer_discount = build_discount(percent=20.0)
+        service._grocery_repository = StubGroceryRepository(product=product)
         service._inventory_service = InventoryService(
             inventory_repository=StubInventoryRepository(build_inventory_item()),
             grocery_repository=service._grocery_repository,
+            discount_repository=StubDiscountRepository(discount=richer_discount),
             default_store_id="main_store",
         )
 

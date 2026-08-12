@@ -168,6 +168,11 @@ class FakeGroceryRepository:
         return None
 
 
+class FakeDiscountRepository:
+    def get_discount(self, discount_id: str):
+        return None
+
+
 class FakeCartSubscriptionAccountRepository:
     def get_by_user_id(self, *, user_id: str):
         return None
@@ -673,6 +678,7 @@ class GroceryShopServicesTests(unittest.TestCase):
         self.inventory_service = InventoryService(
             inventory_repository=self.inventory_repository,
             grocery_repository=self.grocery_repository,
+            discount_repository=FakeDiscountRepository(),
             default_store_id="main_store",
         )
         self.cart_service = CartService(

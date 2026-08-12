@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timezone
 
-from app.models.grocery import CountryCode, CountryPrice, CurrencyCode, GroceryCategory, GroceryCategorySlug, GroceryProduct
+from app.models.grocery import CountryCode, CountryPrice, CurrencyCode, GroceryDiscount, GroceryProduct
 from app.services.inventory_service import InventoryService
 
 
@@ -11,24 +11,18 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def build_category(*, category_id: str, discount_percent: float | None) -> GroceryCategory:
+def build_discount(*, discount_id: str, percent: float) -> GroceryDiscount:
     now = utc_now()
-    return GroceryCategory(
-        id=category_id,
-        slug=GroceryCategorySlug.PROTEIN,
-        name="Protein",
-        icon_name="protein",
-        img_url="",
-        description="",
-        sort_order=1,
-        is_active=True,
+    return GroceryDiscount(
+        id=discount_id,
+        label=f"{percent:g}% Off",
+        percent=percent,
         created_at=now,
         updated_at=now,
-        discount_percent=discount_percent,
     )
 
 
-def build_product(*, category_id: str, amount: float = 10.0) -> GroceryProduct:
+def build_product(*, category_id: str = "cat-1", amount: float = 10.0, discount_id: str | None) -> GroceryProduct:
     now = utc_now()
     return GroceryProduct(
         id="product-1",
@@ -54,32 +48,34 @@ def build_product(*, category_id: str, amount: float = 10.0) -> GroceryProduct:
         is_active=True,
         created_at=now,
         updated_at=now,
+        discount_id=discount_id,
     )
 
 
-class StubGroceryRepository:
-    def __init__(self, category: GroceryCategory | None) -> None:
-        self._category = category
+class StubDiscountRepository:
+    def __init__(self, discount: GroceryDiscount | None) -> None:
+        self._discount = discount
 
-    def get_category(self, category_id: str) -> GroceryCategory | None:
-        if self._category is not None and self._category.id == category_id:
-            return self._category
+    def get_discount(self, discount_id: str) -> GroceryDiscount | None:
+        if self._discount is not None and self._discount.id == discount_id:
+            return self._discount
         return None
 
 
-def build_service(*, category: GroceryCategory | None) -> InventoryService:
+def build_service(*, discount: GroceryDiscount | None) -> InventoryService:
     return InventoryService(
         inventory_repository=None,  # type: ignore[arg-type]
-        grocery_repository=StubGroceryRepository(category),
+        grocery_repository=None,  # type: ignore[arg-type]
+        discount_repository=StubDiscountRepository(discount),
         default_store_id="main_store",
     )
 
 
 class InventoryServiceMemberPricingTests(unittest.TestCase):
-    def test_subscriber_gets_discounted_price_when_category_has_discount(self) -> None:
-        category = build_category(category_id="cat-1", discount_percent=10.0)
-        product = build_product(category_id="cat-1", amount=10.0)
-        service = build_service(category=category)
+    def test_subscriber_gets_discounted_price_when_product_has_discount(self) -> None:
+        discount = build_discount(discount_id="disc-1", percent=10.0)
+        product = build_product(amount=10.0, discount_id="disc-1")
+        service = build_service(discount=discount)
 
         resolved = service.resolve_member_unit_price_minor(product=product, currency="GBP", is_subscriber=True)
 
@@ -88,9 +84,9 @@ class InventoryServiceMemberPricingTests(unittest.TestCase):
         self.assertEqual(10.0, resolved.discount_percent_applied)
 
     def test_non_subscriber_always_pays_base_price(self) -> None:
-        category = build_category(category_id="cat-1", discount_percent=10.0)
-        product = build_product(category_id="cat-1", amount=10.0)
-        service = build_service(category=category)
+        discount = build_discount(discount_id="disc-1", percent=10.0)
+        product = build_product(amount=10.0, discount_id="disc-1")
+        service = build_service(discount=discount)
 
         resolved = service.resolve_member_unit_price_minor(product=product, currency="GBP", is_subscriber=False)
 
@@ -98,19 +94,18 @@ class InventoryServiceMemberPricingTests(unittest.TestCase):
         self.assertEqual(1000, resolved.unit_price_minor)
         self.assertEqual(0.0, resolved.discount_percent_applied)
 
-    def test_subscriber_pays_base_price_when_category_has_no_discount_configured(self) -> None:
-        category = build_category(category_id="cat-1", discount_percent=None)
-        product = build_product(category_id="cat-1", amount=10.0)
-        service = build_service(category=category)
+    def test_subscriber_pays_base_price_when_product_has_no_discount(self) -> None:
+        product = build_product(amount=10.0, discount_id=None)
+        service = build_service(discount=None)
 
         resolved = service.resolve_member_unit_price_minor(product=product, currency="GBP", is_subscriber=True)
 
         self.assertEqual(1000, resolved.unit_price_minor)
         self.assertEqual(0.0, resolved.discount_percent_applied)
 
-    def test_subscriber_pays_base_price_when_category_not_found(self) -> None:
-        product = build_product(category_id="missing-cat", amount=10.0)
-        service = build_service(category=None)
+    def test_subscriber_pays_base_price_when_discount_not_found(self) -> None:
+        product = build_product(amount=10.0, discount_id="missing-disc")
+        service = build_service(discount=None)
 
         resolved = service.resolve_member_unit_price_minor(product=product, currency="GBP", is_subscriber=True)
 

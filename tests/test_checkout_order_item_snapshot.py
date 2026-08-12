@@ -41,14 +41,14 @@ class CheckoutOrderItemSnapshotTests(unittest.TestCase):
         self.assertEqual(10.0, snapshot["discount_percent_applied"])
         self.assertEqual(1800, snapshot["line_total_minor"])
 
-    def test_order_item_snapshot_is_independent_of_later_category_discount_changes(self) -> None:
+    def test_order_item_snapshot_is_independent_of_later_discount_changes(self) -> None:
         # The quote line item captures the discount that was live when the item was priced.
         original_line_item = build_line_item(
             base_price_minor=1000, current_unit_price_minor=900, discount_percent_applied=10.0
         )
         first_order_snapshot = CheckoutService._build_order_items([original_line_item])[0]
 
-        # Simulate the category's discount changing (e.g. admin resets it) after that order exists.
+        # Simulate the product's tied discount changing (e.g. admin unassigns it) after that order exists.
         # A brand-new quote for a fresh cart would reflect the new rate...
         new_rate_line_item = build_line_item(
             base_price_minor=1000, current_unit_price_minor=1000, discount_percent_applied=0.0

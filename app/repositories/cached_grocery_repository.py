@@ -50,25 +50,6 @@ class CachedGroceryRepository(GroceryRepository):
         self._cache.record_fill("grocery_category", cache_key)
         return self._to_category_model(document)
 
-    def set_category_discount(self, *, category_id: str, discount_percent: float) -> GroceryCategory | None:
-        updated = self._base_repository.set_category_discount(
-            category_id=category_id, discount_percent=discount_percent
-        )
-        self._invalidate_category_caches(category_id)
-        return updated
-
-    def clear_category_discount(self, *, category_id: str) -> GroceryCategory | None:
-        updated = self._base_repository.clear_category_discount(category_id=category_id)
-        self._invalidate_category_caches(category_id)
-        return updated
-
-    def _invalidate_category_caches(self, category_id: str) -> None:
-        self._cache.delete_many(
-            grocery_category(category_id),
-            grocery_categories(include_inactive=False),
-            grocery_categories(include_inactive=True),
-        )
-
     def list_products_by_category(
         self,
         *,
@@ -264,6 +245,47 @@ class CachedGroceryRepository(GroceryRepository):
         self._cache.delete_many(*cache_keys)
         self._invalidate_query_caches()
         return deleted
+
+    def assign_products_to_discount(self, *, product_ids: list[str], discount_id: str) -> int:
+        modified = self._base_repository.assign_products_to_discount(
+            product_ids=product_ids, discount_id=discount_id
+        )
+        self._invalidate_product_entity_caches(product_ids)
+        return modified
+
+    def unassign_products_from_discount(self, *, product_ids: list[str]) -> int:
+        modified = self._base_repository.unassign_products_from_discount(product_ids=product_ids)
+        self._invalidate_product_entity_caches(product_ids)
+        return modified
+
+    def unassign_all_products_from_discount(self, *, discount_id: str) -> list[str]:
+        product_ids = self._base_repository.unassign_all_products_from_discount(discount_id=discount_id)
+        self._invalidate_product_entity_caches(product_ids)
+        return product_ids
+
+    def list_products_by_discount(
+        self,
+        *,
+        discount_id: str,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+    ) -> tuple[list[GroceryProduct], int]:
+        return self._base_repository.list_products_by_discount(
+            discount_id=discount_id, page=page, page_size=page_size, search=search
+        )
+
+    def count_products_by_discount(self, *, discount_id: str) -> int:
+        return self._base_repository.count_products_by_discount(discount_id=discount_id)
+
+    def _invalidate_product_entity_caches(self, product_ids: list[str]) -> None:
+        if not product_ids:
+            return
+        cache_keys: list[str] = []
+        for product_id in product_ids:
+            cache_keys.append(grocery_product(product_id, include_inactive=False))
+            cache_keys.append(grocery_product(product_id, include_inactive=True))
+        self._cache.delete_many(*cache_keys)
 
     def _list_categories(self, *, include_inactive: bool) -> list[GroceryCategory]:
         cache_key = grocery_categories(include_inactive=include_inactive)

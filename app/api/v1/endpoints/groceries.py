@@ -103,6 +103,30 @@ def get_product(
         ) from exc
 
 
+@router.get(
+    "/products/{product_id}/similar",
+    response_model=GroceryProductListResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_similar_products(
+    product_id: str,
+    country: CountryCode | None = Query(default=None),
+    limit: int = Query(default=8, ge=1, le=20),
+    grocery_service: GroceryService = Depends(get_grocery_service),
+) -> GroceryProductListResponse:
+    try:
+        return grocery_service.list_similar_products(
+            product_id=product_id,
+            country=country,
+            limit=limit,
+        )
+    except GroceryProductNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Grocery product not found.",
+        ) from exc
+
+
 @router.get("/metadata/cultures", response_model=list[CultureMetadataResponse], status_code=status.HTTP_200_OK)
 def list_cultures(
     grocery_service: GroceryService = Depends(get_grocery_service),

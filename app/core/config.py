@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     openai_meal_conversation_timeout_seconds: float = 30.0
     openai_meal_search_embedding_model: str = "text-embedding-3-small"
     openai_meal_search_embedding_timeout_seconds: float = 20.0
+    openai_grocery_search_embedding_model: str = "text-embedding-3-small"
+    openai_grocery_search_embedding_timeout_seconds: float = 20.0
     openai_promotion_generation_model: str = "gpt-5-mini"
     openai_promotion_generation_timeout_seconds: float = 30.0
     apns_key_id: str | None = None

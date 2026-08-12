@@ -4,11 +4,12 @@ from app.models.grocery import (
     CountryCode,
     CountryPrice,
     CultureTag,
-    GroceryCategory,
+    GroceryDiscount,
     GroceryProduct,
     NutrientType,
     NutrientUnit,
 )
+from app.repositories.discount_repository import DiscountRepository
 from app.repositories.grocery_repository import GroceryRepository
 from app.schemas.grocery import (
     CountryPriceResponse,
@@ -21,7 +22,8 @@ from app.schemas.grocery import (
     NutritionSpecResponse,
     ResolvedPriceResponse,
 )
-from app.services.pricing import apply_category_discount
+from app.services.grocery_similar_products_service import GrocerySimilarProductsService
+from app.services.pricing import apply_discount
 
 
 class GroceryCategoryNotFoundError(Exception):
@@ -58,8 +60,17 @@ NUTRIENT_REGISTRY: tuple[NutrientMetadata, ...] = (
 
 
 class GroceryService:
-    def __init__(self, grocery_repository: GroceryRepository) -> None:
+    def __init__(
+        self,
+        grocery_repository: GroceryRepository,
+        discount_repository: DiscountRepository,
+        similar_products_service: GrocerySimilarProductsService | None = None,
+    ) -> None:
         self._grocery_repository = grocery_repository
+        self._discount_repository = discount_repository
+        self._similar_products_service = similar_products_service or GrocerySimilarProductsService(
+            grocery_repository
+        )
 
     def list_categories(self) -> list[GroceryCategoryResponse]:
         return [
@@ -87,8 +98,7 @@ class GroceryService:
         page: int,
         page_size: int,
     ) -> GroceryProductListResponse:
-        category = self._grocery_repository.get_category(category_id)
-        if category is None:
+        if self._grocery_repository.get_category(category_id) is None:
             raise GroceryCategoryNotFoundError
 
         products, total = self._grocery_repository.list_products_by_category(
@@ -101,61 +111,7 @@ class GroceryService:
             page_size=page_size,
         )
 
-        return GroceryProductListResponse(
-            items=[
-                GroceryProductListItemResponse(
-                    id=product.id,
-                    category_id=product.category_id,
-                    img_url=product.img_url,
-                    product=product.product,
-                    sort_order=product.sort_order,
-                    product_tags=product.product_tags,
-                    culture_tags=product.culture_tags,
-                    nutritional_specs=[
-                        NutritionSpecResponse(
-                            nutrient_id=spec.nutrient_id,
-                            amount=spec.amount,
-                            unit=spec.unit,
-                        )
-                        for spec in product.nutritional_specs
-                    ],
-                    resolved_price=self._resolve_price_response(product, country, category),
-                )
-                for product in products
-            ],
-            total=total,
-            page=page,
-            page_size=page_size,
-        )
-
-    def list_products(
-        self,
-        *,
-        country: CountryCode | None,
-        culture: CultureTag | None,
-        search: str | None,
-        product_tag: str | None,
-        category_id: str | None,
-        sort: str | None,
-        page: int,
-        page_size: int,
-    ) -> GroceryProductListResponse:
-        category_cache: dict[str, GroceryCategory | None] = {}
-        if category_id:
-            category = self._grocery_repository.get_category(category_id)
-            if category is None:
-                raise GroceryCategoryNotFoundError
-            category_cache[category_id] = category
-
-        products, total = self._grocery_repository.list_products(
-            category_id=category_id,
-            culture_tag=culture,
-            search=search,
-            product_tag=product_tag,
-            sort=sort,
-            page=page,
-            page_size=page_size,
-        )
+        discount_cache: dict[str, GroceryDiscount | None] = {}
 
         return GroceryProductListResponse(
             items=[
@@ -176,7 +132,63 @@ class GroceryService:
                         for spec in product.nutritional_specs
                     ],
                     resolved_price=self._resolve_price_response(
-                        product, country, self._resolve_category(product.category_id, category_cache)
+                        product, country, self._resolve_discount(product.discount_id, discount_cache)
+                    ),
+                )
+                for product in products
+            ],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    def list_products(
+        self,
+        *,
+        country: CountryCode | None,
+        culture: CultureTag | None,
+        search: str | None,
+        product_tag: str | None,
+        category_id: str | None,
+        sort: str | None,
+        page: int,
+        page_size: int,
+    ) -> GroceryProductListResponse:
+        if category_id and self._grocery_repository.get_category(category_id) is None:
+            raise GroceryCategoryNotFoundError
+
+        products, total = self._grocery_repository.list_products(
+            category_id=category_id,
+            culture_tag=culture,
+            search=search,
+            product_tag=product_tag,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+        )
+
+        discount_cache: dict[str, GroceryDiscount | None] = {}
+
+        return GroceryProductListResponse(
+            items=[
+                GroceryProductListItemResponse(
+                    id=product.id,
+                    category_id=product.category_id,
+                    img_url=product.img_url,
+                    product=product.product,
+                    sort_order=product.sort_order,
+                    product_tags=product.product_tags,
+                    culture_tags=product.culture_tags,
+                    nutritional_specs=[
+                        NutritionSpecResponse(
+                            nutrient_id=spec.nutrient_id,
+                            amount=spec.amount,
+                            unit=spec.unit,
+                        )
+                        for spec in product.nutritional_specs
+                    ],
+                    resolved_price=self._resolve_price_response(
+                        product, country, self._resolve_discount(product.discount_id, discount_cache)
                     ),
                 )
                 for product in products
@@ -191,12 +203,12 @@ class GroceryService:
         if product is None:
             raise GroceryProductNotFoundError
 
-        category = self._grocery_repository.get_category(product.category_id)
+        discount = self._resolve_discount(product.discount_id, {})
 
         prices: list[CountryPriceResponse] = []
         for price in product.prices:
             member_amount, discount_percent = self._resolve_member_pricing(
-                category=category, base_amount=price.amount
+                discount=discount, base_amount=price.amount
             )
             prices.append(
                 CountryPriceResponse(
@@ -234,6 +246,49 @@ class GroceryService:
             description=product.description,
         )
 
+    def list_similar_products(
+        self,
+        *,
+        product_id: str,
+        country: CountryCode | None,
+        limit: int,
+    ) -> GroceryProductListResponse:
+        if self._grocery_repository.get_product(product_id) is None:
+            raise GroceryProductNotFoundError
+
+        similar_items = self._similar_products_service.find_similar(product_id=product_id, limit=limit)
+        discount_cache: dict[str, GroceryDiscount | None] = {}
+
+        response_items = [
+            GroceryProductListItemResponse(
+                id=item.product.id,
+                category_id=item.product.category_id,
+                img_url=item.product.img_url,
+                product=item.product.product,
+                sort_order=item.product.sort_order,
+                product_tags=item.product.product_tags,
+                culture_tags=item.product.culture_tags,
+                nutritional_specs=[
+                    NutritionSpecResponse(
+                        nutrient_id=spec.nutrient_id,
+                        amount=spec.amount,
+                        unit=spec.unit,
+                    )
+                    for spec in item.product.nutritional_specs
+                ],
+                resolved_price=self._resolve_price_response(
+                    item.product, country, self._resolve_discount(item.product.discount_id, discount_cache)
+                ),
+            )
+            for item in similar_items
+        ]
+        return GroceryProductListResponse(
+            items=response_items,
+            total=len(response_items),
+            page=1,
+            page_size=max(len(response_items), 1),
+        )
+
     def list_cultures(self) -> list[CultureMetadataResponse]:
         return [
             CultureMetadataResponse(
@@ -254,20 +309,22 @@ class GroceryService:
             for metadata in NUTRIENT_REGISTRY
         ]
 
-    def _resolve_category(
+    def _resolve_discount(
         self,
-        category_id: str,
-        cache: dict[str, GroceryCategory | None],
-    ) -> GroceryCategory | None:
-        if category_id not in cache:
-            cache[category_id] = self._grocery_repository.get_category(category_id)
-        return cache[category_id]
+        discount_id: str | None,
+        cache: dict[str, GroceryDiscount | None],
+    ) -> GroceryDiscount | None:
+        if discount_id is None:
+            return None
+        if discount_id not in cache:
+            cache[discount_id] = self._discount_repository.get_discount(discount_id)
+        return cache[discount_id]
 
     def _resolve_price_response(
         self,
         product: GroceryProduct,
         country: CountryCode | None,
-        category: GroceryCategory | None,
+        discount: GroceryDiscount | None,
     ) -> ResolvedPriceResponse | None:
         if country is None:
             return None
@@ -283,16 +340,16 @@ class GroceryService:
         if price is None:
             return None
 
-        return self._to_resolved_price(price, category=category)
+        return self._to_resolved_price(price, discount=discount)
 
     def _to_resolved_price(
         self,
         price: CountryPrice,
         *,
-        category: GroceryCategory | None,
+        discount: GroceryDiscount | None,
     ) -> ResolvedPriceResponse:
         member_amount, discount_percent = self._resolve_member_pricing(
-            category=category, base_amount=price.amount
+            discount=discount, base_amount=price.amount
         )
 
         return ResolvedPriceResponse(
@@ -307,12 +364,12 @@ class GroceryService:
     def _resolve_member_pricing(
         self,
         *,
-        category: GroceryCategory | None,
+        discount: GroceryDiscount | None,
         base_amount: float,
     ) -> tuple[float | None, float | None]:
-        if category is None or not category.discount_percent:
+        if discount is None or not discount.percent:
             return None, None
 
         base_price_minor = int(round(base_amount * 100))
-        final_price_minor, effective_percent = apply_category_discount(base_price_minor, category.discount_percent)
+        final_price_minor, effective_percent = apply_discount(base_price_minor, discount.percent)
         return final_price_minor / 100, effective_percent

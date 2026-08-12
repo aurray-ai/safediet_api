@@ -631,6 +631,14 @@ class BillingService:
             if item.plan_code == SubscriptionPlanCode.PREMIUM_MONTHLY
             else "Safediet Free"
         )
+        # A canceled/expired status unambiguously means the account is not premium,
+        # regardless of what is_premium was last persisted as. This guards against
+        # is_premium going stale when the source that's supposed to flip it (a Stripe
+        # webhook, or the client's App Store entitlement sync) never fires.
+        is_premium = item.is_premium and item.status not in (
+            SubscriptionStatus.CANCELED,
+            SubscriptionStatus.EXPIRED,
+        )
         return SubscriptionSnapshotResponse(
             plan_code=item.plan_code,
             plan_name=plan_name,
@@ -638,7 +646,7 @@ class BillingService:
             provider=item.provider,
             price_minor=item.price_minor,
             currency=item.currency,
-            is_premium=item.is_premium,
+            is_premium=is_premium,
             started_at=item.started_at,
             expires_at=item.expires_at,
             renewal_at=item.renewal_at,
