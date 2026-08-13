@@ -55,7 +55,7 @@ def make_customer() -> User:
 def make_billing_overview(*, is_premium: bool = False) -> BillingOverviewResponse:
     return BillingOverviewResponse(
         subscription=SubscriptionSnapshotResponse(
-            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY if is_premium else SubscriptionPlanCode.FREE,
+            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD if is_premium else SubscriptionPlanCode.FREE,
             plan_name="Premium" if is_premium else "Free",
             status=SubscriptionStatus.ACTIVE if is_premium else SubscriptionStatus.INACTIVE,
             provider="stripe",

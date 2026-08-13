@@ -125,7 +125,8 @@ class StripeWalletTopupIntentResponse(BaseModel):
 class StripeSubscriptionSetupIntentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    plan_code: SubscriptionPlanCode = SubscriptionPlanCode.PREMIUM_MONTHLY
+    # No plan_code here on purpose — the price tier (student vs. standard) is resolved
+    # server-side from the caller's verification status, never trusted from the client.
     currency: str = Field(min_length=3, max_length=3, default="GBP")
     idempotency_key: str = Field(min_length=8, max_length=200)
 

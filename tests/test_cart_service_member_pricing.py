@@ -140,6 +140,8 @@ class StubCartRepository:
                 current_unit_price_minor=int(item["current_unit_price_minor"]),
                 base_price_minor=int(item.get("base_price_minor") or item["current_unit_price_minor"]),
                 discount_percent_applied=float(item.get("discount_percent_applied") or 0.0),
+                member_price_minor=int(item.get("member_price_minor") or item["current_unit_price_minor"]),
+                member_discount_percent=float(item.get("member_discount_percent") or 0.0),
                 currency=str(item["currency"]),
                 allow_substitutions=bool(item["allow_substitutions"]),
                 substitution_note=str(item["substitution_note"]),
@@ -238,6 +240,36 @@ class CartServiceMemberPricingTests(unittest.TestCase):
         self.assertEqual(1000, item.base_price_minor)
         self.assertEqual(900, item.current_unit_price_minor)
         self.assertEqual(10.0, item.discount_percent_applied)
+        self.assertEqual(900, item.member_price_minor)
+        self.assertEqual(10.0, item.member_discount_percent)
+        self.assertEqual(1000, response.summary.base_subtotal_minor)
+        self.assertEqual(900, response.summary.member_subtotal_minor)
+        self.assertEqual(100, response.summary.savings_minor)
+
+    def test_non_subscriber_cart_still_exposes_member_price_and_savings(self) -> None:
+        # A non-subscriber is charged base price, but the cart must still surface
+        # what a member would pay so the UI can show "members would pay £X /
+        # you could save £Y" even though nothing is being discounted for them.
+        product = build_product(amount=10.0)
+        discount = build_discount(percent=10.0)
+        service, _ = build_service(
+            product=product, discount=discount, inventory_item=build_inventory_item(), is_premium=False
+        )
+
+        response = service.upsert_item(
+            current_user=build_user(),
+            payload=CartItemUpsertRequest(product_id="product-1", quantity=1),
+        )
+
+        item = response.items[0]
+        self.assertEqual(1000, item.current_unit_price_minor)
+        self.assertEqual(0.0, item.discount_percent_applied)
+        self.assertEqual(900, item.member_price_minor)
+        self.assertEqual(10.0, item.member_discount_percent)
+        self.assertEqual(1000, response.summary.subtotal_minor)
+        self.assertEqual(1000, response.summary.base_subtotal_minor)
+        self.assertEqual(900, response.summary.member_subtotal_minor)
+        self.assertEqual(100, response.summary.savings_minor)
 
     def test_add_item_with_stale_premium_flag_but_canceled_status_pays_base_price(self) -> None:
         # Reproduces the reported bug: is_premium is still True from before the

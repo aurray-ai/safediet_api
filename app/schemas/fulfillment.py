@@ -121,13 +121,18 @@ class MealOrderFulfillmentListResponse(BaseModel):
 class GroceryOrderFulfillmentItemResponse(BaseModel):
     id: str
     product_id: str
+    category_id: str
     product_name: str
     img_url: str
     quantity: int
     unit_label: str
+    unit_weight_grams: int
     unit_price_minor: int
     line_total_minor: int
     currency: str
+    allow_substitutions: bool
+    substitution_resolution: str
+    substituted_product_id: str | None
     source_meal_id: str | None
 
 

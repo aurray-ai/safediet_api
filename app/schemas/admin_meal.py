@@ -21,6 +21,11 @@ class AdminMealEstimatedCostPayload(BaseModel):
     amount: float = Field(gt=0)
 
 
+class AdminMealEstimatedCostSummary(BaseModel):
+    currency_code: CurrencyCode
+    amount: float = Field(gt=0)
+
+
 class AdminMealSellingPricePayload(BaseModel):
     country_code: CountryCode
     currency_code: CurrencyCode
@@ -290,8 +295,21 @@ class AdminMealResponse(AdminMealPayload):
     updated_at: datetime
 
 
+class AdminMealListItemResponse(BaseModel):
+    id: str
+    name: str
+    hero_image_url: str = Field(default="", max_length=500)
+    meal_type: MealType
+    category_ids: list[str]
+    prep_time_minutes: int
+    cook_time_minutes: int
+    servings: int
+    estimated_cost: AdminMealEstimatedCostSummary | None = None
+    is_active: bool
+
+
 class AdminMealListResponse(BaseModel):
-    items: list[AdminMealResponse]
+    items: list[AdminMealListItemResponse]
     total: int
     page: int
     page_size: int

@@ -81,6 +81,9 @@ class OrderResponse(BaseModel):
 
 class OrderListResponse(BaseModel):
     items: list[OrderResponse]
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
     next_cursor: str | None = None
 
 

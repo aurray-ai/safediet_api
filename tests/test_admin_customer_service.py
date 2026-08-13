@@ -247,7 +247,7 @@ class AdminCustomerServiceTests(unittest.TestCase):
     def _activate_premium(self, *, user_id: str, provider: str) -> None:
         self.subscription_repo.upsert_subscription(
             user_id=user_id,
-            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY,
+            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD,
             status=SubscriptionStatus.ACTIVE,
             provider=provider,
             price_minor=900,

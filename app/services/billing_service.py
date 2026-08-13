@@ -9,6 +9,7 @@ from uuid import uuid4
 from app.models.billing import (
     ChargeType,
     CheckoutRoute,
+    PLAN_DISPLAY_NAME,
     SubscriptionAccount,
     SubscriptionPlanCode,
     SubscriptionStatus,
@@ -626,11 +627,7 @@ class BillingService:
 
     @staticmethod
     def _to_subscription_response(item: SubscriptionAccount) -> SubscriptionSnapshotResponse:
-        plan_name = (
-            "Safediet Premium"
-            if item.plan_code == SubscriptionPlanCode.PREMIUM_MONTHLY
-            else "Safediet Free"
-        )
+        plan_name = PLAN_DISPLAY_NAME.get(item.plan_code, "Safediet Free")
         # A canceled/expired status unambiguously means the account is not premium,
         # regardless of what is_premium was last persisted as. This guards against
         # is_premium going stale when the source that's supposed to flip it (a Stripe

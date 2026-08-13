@@ -32,6 +32,12 @@ class AdminCountryPricePayload(BaseModel):
         return normalized or None
 
 
+class AdminCountryPriceSummary(BaseModel):
+    currency_code: CurrencyCode
+    amount: float = Field(gt=0)
+    price_unit: str = Field(min_length=1, max_length=80)
+
+
 class AdminGroceryProductPayload(BaseModel):
     category_id: str = Field(min_length=1, max_length=120)
     img_url: str = Field(default="", max_length=500)
@@ -114,8 +120,18 @@ class AdminGroceryProductResponse(BaseModel):
     updated_at: datetime
 
 
+class AdminGroceryProductListItemResponse(BaseModel):
+    id: str
+    category_id: str
+    category_name: str
+    img_url: str = Field(default="", max_length=500)
+    product: str
+    price: AdminCountryPriceSummary | None = None
+    is_active: bool
+
+
 class AdminGroceryProductListResponse(BaseModel):
-    items: list[AdminGroceryProductResponse]
+    items: list[AdminGroceryProductListItemResponse]
     total: int
     page: int
     page_size: int

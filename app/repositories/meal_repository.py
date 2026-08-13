@@ -353,6 +353,77 @@ class MealRepository:
         )
         return [self._to_meal_model(document) for document in documents], total
 
+    def list_all_meal_summaries(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        meal_type: MealType | None = None,
+        category_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        query: dict[str, Any] = {}
+
+        if meal_type is not None:
+            self._append_and_clause(
+                query,
+                {
+                    "$or": [
+                        {"meal_type": meal_type.value},
+                        {"meal_types": meal_type.value},
+                    ]
+                },
+            )
+        if category_id:
+            query["category_ids"] = category_id
+        if search:
+            normalized = search.strip()
+            self._append_and_clause(
+                query,
+                {
+                    "$or": [
+                        {"name": {"$regex": normalized, "$options": "i"}},
+                    ]
+                },
+            )
+
+        total = self._meals.count_documents(query)
+        documents = (
+            self._meals.find(
+                query,
+                {
+                    "_id": 1,
+                    "name": 1,
+                    "hero_image_url": 1,
+                    "meal_type": 1,
+                    "category_ids": 1,
+                    "prep_time_minutes": 1,
+                    "cook_time_minutes": 1,
+                    "servings": 1,
+                    "estimated_costs": 1,
+                    "is_active": 1,
+                },
+            )
+            .sort([("updated_at", DESCENDING), ("name", ASCENDING)])
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return [
+            {
+                "id": str(document["_id"]),
+                "name": str(document["name"]),
+                "hero_image_url": str(document.get("hero_image_url", "")),
+                "meal_type": MealType(str(document["meal_type"])),
+                "category_ids": [str(category_id) for category_id in document.get("category_ids", [])],
+                "prep_time_minutes": int(document.get("prep_time_minutes", 0)),
+                "cook_time_minutes": int(document.get("cook_time_minutes", 0)),
+                "servings": int(document.get("servings", 0)),
+                "estimated_costs": list(document.get("estimated_costs", [])),
+                "is_active": bool(document.get("is_active", True)),
+            }
+            for document in documents
+        ], total
+
     def create_meal(
         self,
         *,

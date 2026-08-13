@@ -230,6 +230,9 @@ class MongoDatabaseManager:
     def household_expense_splits_collection(self) -> Collection[dict[str, Any]]:
         return self.database()["household_expense_splits"]
 
+    def student_verifications_collection(self) -> Collection[dict[str, Any]]:
+        return self.database()["student_verifications"]
+
     def ensure_indexes(self) -> None:
         self.users_collection().create_index(
             [("email", ASCENDING)],
@@ -688,6 +691,20 @@ class MongoDatabaseManager:
             name="ix_wallet_ledger_entries_wallet_created",
         )
         self._ensure_wallet_ledger_idempotency_index()
+        self.student_verifications_collection().create_index(
+            [("user_id", ASCENDING)],
+            name="uq_student_verifications_user_id",
+            unique=True,
+        )
+        self.student_verifications_collection().create_index(
+            [("status", ASCENDING), ("expires_at", ASCENDING)],
+            name="ix_student_verifications_status_expires",
+        )
+        self.student_verifications_collection().create_index(
+            [("unidays_reference_id", ASCENDING)],
+            name="ix_student_verifications_unidays_reference",
+            sparse=True,
+        )
         try:
             self.households_collection().drop_index("uq_households_owner_active")
         except OperationFailure:

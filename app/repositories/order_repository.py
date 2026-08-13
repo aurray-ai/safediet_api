@@ -98,27 +98,20 @@ class OrderRepository:
         self,
         *,
         status: str | None,
-        before: str | None,
-        limit: int,
-    ) -> tuple[list[Order], str | None]:
+        page: int,
+        page_size: int,
+    ) -> tuple[list[Order], int]:
         query: dict[str, Any] = {}
         if status:
             query["status"] = status
-        if before:
-            before_created_at, before_id = self._decode_cursor(before)
-            query["$or"] = [
-                {"created_at": {"$lt": before_created_at}},
-                {"created_at": before_created_at, "_id": {"$lt": before_id}},
-            ]
-        documents = list(
+        total = self._collection.count_documents(query)
+        documents = (
             self._collection.find(query)
             .sort([("created_at", DESCENDING), ("_id", DESCENDING)])
-            .limit(limit + 1)
+            .skip((page - 1) * page_size)
+            .limit(page_size)
         )
-        has_more = len(documents) > limit
-        page = documents[:limit]
-        next_cursor = self._encode_cursor(page[-1]) if has_more and page else None
-        return [self._to_model(document) for document in page], next_cursor
+        return [self._to_model(document) for document in documents], total
 
     def update_status(
         self,

@@ -19,6 +19,7 @@ from app.repositories.promotion_campaign_repository import PromotionCampaignRepo
 from app.repositories.promotion_delivery_repository import PromotionDeliveryRepository
 from app.repositories.promotion_draft_repository import PromotionDraftRepository
 from app.repositories.refund_repository import RefundRepository
+from app.repositories.student_verification_repository import StudentVerificationRepository
 from app.repositories.subscription_account_repository import SubscriptionAccountRepository
 from app.repositories.cached_meal_conversation_repository import CachedMealConversationRepository
 from app.repositories.cached_discount_repository import CachedDiscountRepository
@@ -68,6 +69,7 @@ from app.services.meal_order_service import MealOrderService
 from app.services.email_service import EmailService, build_email_sender
 from app.services.notification_copy_service import NotificationCopyService
 from app.services.order_fulfillment_communication_service import OrderFulfillmentCommunicationService
+from app.services.order_status_communication_service import OrderStatusCommunicationService
 from app.services.subscription_communication_service import SubscriptionCommunicationService
 from app.services.discount_service import DiscountService
 from app.services.grocery_catalog_embedding_service import GroceryCatalogEmbeddingService
@@ -98,6 +100,8 @@ from app.services.refund_service import RefundService
 from app.services.saved_meal_plan_service import SavedMealPlanService
 from app.services.goal_target_service import GoalTargetService
 from app.services.stripe_billing_gateway import StripeBillingGateway
+from app.services.student_verification_service import StudentVerificationService
+from app.services.unidays_gateway import UnidaysGateway
 from app.services.survey_service import SurveyService
 from app.services.user_meal_usage_service import UserMealUsageService
 from app.services.user_pantry_service import UserPantryService
@@ -305,6 +309,10 @@ def get_subscription_account_repository() -> SubscriptionAccountRepository:
     return SubscriptionAccountRepository(mongo_manager.subscription_accounts_collection())
 
 
+def get_student_verification_repository() -> StudentVerificationRepository:
+    return StudentVerificationRepository(mongo_manager.student_verifications_collection())
+
+
 def get_wallet_account_repository() -> WalletAccountRepository:
     return WalletAccountRepository(mongo_manager.wallet_accounts_collection())
 
@@ -319,6 +327,24 @@ def get_goal_target_service() -> GoalTargetService:
 
 def get_stripe_billing_gateway() -> StripeBillingGateway:
     return StripeBillingGateway(settings=get_settings())
+
+
+def get_unidays_gateway() -> UnidaysGateway:
+    return UnidaysGateway(settings=get_settings())
+
+
+def get_student_verification_service(
+    repository: StudentVerificationRepository = Depends(get_student_verification_repository),
+    unidays_gateway: UnidaysGateway = Depends(get_unidays_gateway),
+    user_repository: UserRepository = Depends(get_user_repository),
+) -> StudentVerificationService:
+    return StudentVerificationService(
+        repository=repository,
+        unidays_gateway=unidays_gateway,
+        email_service=get_email_service(),
+        user_repository=user_repository,
+        settings=get_settings(),
+    )
 
 
 def get_auth_service(
@@ -340,6 +366,7 @@ def get_email_service() -> EmailService:
     return EmailService(
         sender=build_email_sender(settings),
         web_app_base_url=settings.web_app_base_url,
+        mobile_app_link_base_url=settings.mobile_app_link_base_url,
     )
 
 
@@ -762,6 +789,7 @@ def get_checkout_service(
     grocery_repository: GroceryRepository = Depends(get_grocery_repository),
     inventory_repository: InventoryRepository = Depends(get_inventory_repository),
     address_repository: AddressRepository = Depends(get_address_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
     inventory_service: InventoryService = Depends(get_inventory_service),
     billing_service: BillingService = Depends(get_billing_service),
     stripe_gateway: StripeBillingGateway = Depends(get_stripe_billing_gateway),
@@ -777,26 +805,18 @@ def get_checkout_service(
         grocery_repository=grocery_repository,
         inventory_repository=inventory_repository,
         address_repository=address_repository,
+        user_repository=user_repository,
         inventory_service=inventory_service,
         billing_service=billing_service,
         stripe_gateway=stripe_gateway,
         delivery_window_service=delivery_window_service,
+        email_service=get_email_service(),
         default_store_id=settings.grocery_default_store_id,
         default_currency=settings.grocery_default_currency,
         free_delivery_subtotal_minor=settings.grocery_free_delivery_subtotal_minor,
         delivery_timezone_name=settings.grocery_delivery_default_timezone,
         quote_ttl_seconds=settings.grocery_checkout_quote_ttl_seconds,
         cancellation_window_minutes=settings.grocery_order_cancellation_window_minutes,
-    )
-
-
-def get_order_service(
-    order_repository: OrderRepository = Depends(get_order_repository),
-    grocery_repository: GroceryRepository = Depends(get_grocery_repository),
-) -> OrderService:
-    return OrderService(
-        order_repository=order_repository,
-        grocery_repository=grocery_repository,
     )
 
 
@@ -952,6 +972,34 @@ def get_push_notification_service(
     )
 
 
+def get_order_status_communication_service(
+    notification_repository: NotificationRepository = Depends(get_notification_repository),
+    user_repository: UserRepository = Depends(get_user_repository),
+    email_service: EmailService = Depends(get_email_service),
+    push_notification_service: PushNotificationService = Depends(get_push_notification_service),
+    settings: Settings = Depends(get_settings),
+) -> OrderStatusCommunicationService:
+    return OrderStatusCommunicationService(
+        notification_repository=notification_repository,
+        user_repository=user_repository,
+        email_service=email_service,
+        push_notification_service=push_notification_service,
+        web_app_base_url=settings.web_app_base_url,
+    )
+
+
+def get_order_service(
+    order_repository: OrderRepository = Depends(get_order_repository),
+    grocery_repository: GroceryRepository = Depends(get_grocery_repository),
+    communication_service: OrderStatusCommunicationService = Depends(get_order_status_communication_service),
+) -> OrderService:
+    return OrderService(
+        order_repository=order_repository,
+        grocery_repository=grocery_repository,
+        communication_service=communication_service,
+    )
+
+
 def get_order_fulfillment_communication_service(
     notification_repository: NotificationRepository = Depends(get_notification_repository),
     user_repository: UserRepository = Depends(get_user_repository),
@@ -1087,5 +1135,3 @@ def get_optional_current_user(
             detail="Authenticated user not found.",
         )
     return user
-
-

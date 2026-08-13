@@ -30,6 +30,8 @@ class ResolvedMemberPrice:
     base_price_minor: int
     unit_price_minor: int
     discount_percent_applied: float
+    member_price_minor: int
+    member_discount_percent: float
 
 
 class InventoryService:
@@ -285,16 +287,28 @@ class InventoryService:
         base_price_minor = self.resolve_unit_price_minor(product=product, currency=currency)
 
         discount_percent = None
-        if is_subscriber and product.discount_id is not None:
+        if product.discount_id is not None:
             discount = self._discount_repository.get_discount(product.discount_id)
             if discount is not None:
                 discount_percent = discount.percent
 
-        unit_price_minor, discount_percent_applied = apply_discount(base_price_minor, discount_percent)
+        # member_price_minor/member_discount_percent are always resolved from the
+        # product's discount, independent of subscriber status, so callers can show
+        # "what a member would pay" even to a non-subscriber. unit_price_minor/
+        # discount_percent_applied remain the actually-charged amount, unchanged
+        # from prior behavior: full price unless the requester is a subscriber.
+        member_price_minor, member_discount_percent = apply_discount(base_price_minor, discount_percent)
+        if is_subscriber:
+            unit_price_minor, discount_percent_applied = member_price_minor, member_discount_percent
+        else:
+            unit_price_minor, discount_percent_applied = base_price_minor, 0.0
+
         return ResolvedMemberPrice(
             base_price_minor=base_price_minor,
             unit_price_minor=unit_price_minor,
             discount_percent_applied=discount_percent_applied,
+            member_price_minor=member_price_minor,
+            member_discount_percent=member_discount_percent,
         )
 
     def resolve_weight_based_delivery_fee(

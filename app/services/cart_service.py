@@ -224,6 +224,8 @@ class CartService:
             "current_unit_price_minor": unit_price_minor,
             "base_price_minor": resolved_price.base_price_minor,
             "discount_percent_applied": resolved_price.discount_percent_applied,
+            "member_price_minor": resolved_price.member_price_minor,
+            "member_discount_percent": resolved_price.member_discount_percent,
             "currency": cart.currency,
             "allow_substitutions": allow_substitutions,
             "substitution_note": substitution_note,
@@ -372,6 +374,8 @@ class CartService:
         items = []
         total_weight = 0
         subtotal_minor = 0
+        base_subtotal_minor = 0
+        member_subtotal_minor = 0
         for item in cart.items:
             product = self._grocery_repository.get_product(item.product_id)
             inventory = self._inventory_service.ensure_sellable_inventory_item(
@@ -383,6 +387,8 @@ class CartService:
                 current_unit_price_minor = item.current_unit_price_minor
                 base_price_minor = item.base_price_minor
                 discount_percent_applied = item.discount_percent_applied
+                member_price_minor = item.member_price_minor
+                member_discount_percent = item.member_discount_percent
             else:
                 resolved_price = self._inventory_service.resolve_member_unit_price_minor(
                     product=product,
@@ -392,6 +398,8 @@ class CartService:
                 current_unit_price_minor = resolved_price.unit_price_minor
                 base_price_minor = resolved_price.base_price_minor
                 discount_percent_applied = resolved_price.discount_percent_applied
+                member_price_minor = resolved_price.member_price_minor
+                member_discount_percent = resolved_price.member_discount_percent
                 pricing_state = (
                     CartItemPricingState.PRICE_CHANGED
                     if current_unit_price_minor != item.observed_unit_price_minor
@@ -399,6 +407,8 @@ class CartService:
                 )
                 total_weight += inventory.unit_weight_grams * item.quantity
                 subtotal_minor += current_unit_price_minor * item.quantity
+                base_subtotal_minor += base_price_minor * item.quantity
+                member_subtotal_minor += member_price_minor * item.quantity
             items.append(
                 {
                     "id": item.id,
@@ -413,6 +423,8 @@ class CartService:
                     "current_unit_price_minor": current_unit_price_minor,
                     "base_price_minor": base_price_minor,
                     "discount_percent_applied": discount_percent_applied,
+                    "member_price_minor": member_price_minor,
+                    "member_discount_percent": member_discount_percent,
                     "currency": cart.currency,
                     "allow_substitutions": item.allow_substitutions if inventory is None else inventory.allow_substitutions and item.allow_substitutions,
                     "substitution_note": item.substitution_note,
@@ -435,6 +447,9 @@ class CartService:
         pricing_snapshot = {
             "currency": cart.currency,
             "subtotal_minor": subtotal_minor,
+            "base_subtotal_minor": base_subtotal_minor,
+            "member_subtotal_minor": member_subtotal_minor,
+            "savings_minor": max(base_subtotal_minor - member_subtotal_minor, 0),
             "delivery_fee_minor": delivery_fee_minor,
             "service_fee_minor": 0,
             "total_minor": subtotal_minor + delivery_fee_minor,
@@ -479,6 +494,8 @@ class CartService:
                     current_unit_price_minor=item.current_unit_price_minor,
                     base_price_minor=item.base_price_minor,
                     discount_percent_applied=item.discount_percent_applied,
+                    member_price_minor=item.member_price_minor,
+                    member_discount_percent=item.member_discount_percent,
                     currency=item.currency,
                     allow_substitutions=item.allow_substitutions,
                     substitution_note=item.substitution_note,
@@ -494,6 +511,9 @@ class CartService:
             summary=CartSummaryResponse(
                 currency=str(snapshot.get("currency") or cart.currency),
                 subtotal_minor=int(snapshot.get("subtotal_minor") or 0),
+                base_subtotal_minor=int(snapshot.get("base_subtotal_minor") or snapshot.get("subtotal_minor") or 0),
+                member_subtotal_minor=int(snapshot.get("member_subtotal_minor") or snapshot.get("subtotal_minor") or 0),
+                savings_minor=int(snapshot.get("savings_minor") or 0),
                 delivery_fee_minor=int(snapshot.get("delivery_fee_minor") or 0),
                 service_fee_minor=int(snapshot.get("service_fee_minor") or 0),
                 total_minor=int(snapshot.get("total_minor") or 0),
@@ -526,6 +546,8 @@ class CartService:
             "current_unit_price_minor": item.current_unit_price_minor,
             "base_price_minor": item.base_price_minor,
             "discount_percent_applied": item.discount_percent_applied,
+            "member_price_minor": item.member_price_minor,
+            "member_discount_percent": item.member_discount_percent,
             "currency": item.currency,
             "allow_substitutions": item.allow_substitutions,
             "substitution_note": item.substitution_note,

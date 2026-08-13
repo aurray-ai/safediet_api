@@ -10,9 +10,10 @@ from app.dependencies import (
     get_meal_checkout_service,
     get_meal_plan_checkout_service,
     get_stripe_billing_gateway,
+    get_student_verification_service,
 )
 from app.models.user import User
-from app.models.billing import SubscriptionPlanCode, SubscriptionStatus, WalletFundingMethod
+from app.models.billing import PLAN_PRICE_MINOR, SubscriptionPlanCode, SubscriptionStatus, WalletFundingMethod
 from app.schemas.billing import (
     BillingOverviewResponse,
     CheckoutEvaluationRequest,
@@ -41,6 +42,7 @@ from app.services.checkout_service import CheckoutService
 from app.services.meal_checkout_service import MealCheckoutService
 from app.services.meal_plan_checkout_service import MealPlanCheckoutService
 from app.services.stripe_billing_gateway import StripeBillingGateway
+from app.services.student_verification_service import PlanEligibility, StudentVerificationService
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -152,24 +154,34 @@ def create_stripe_subscription_setup_intent(
     current_user: User = Depends(get_current_user),
     billing_service: BillingService = Depends(get_billing_service),
     stripe_gateway: StripeBillingGateway = Depends(get_stripe_billing_gateway),
+    student_verification_service: StudentVerificationService = Depends(get_student_verification_service),
 ) -> StripeSubscriptionSetupIntentResponse:
     current_subscription = billing_service.get_subscription(current_user=current_user)
     if current_subscription.is_premium:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Subscription is already active.")
+
+    eligible_plan = student_verification_service.resolve_eligible_plan(user=current_user)
+    if eligible_plan.eligibility == PlanEligibility.AWAITING_VERIFICATION:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Student verification is still in progress. Checkout unlocks once it's confirmed.",
+        )
+    plan_code = eligible_plan.plan_code or SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD
+    price_minor = eligible_plan.price_minor or PLAN_PRICE_MINOR[plan_code]
 
     try:
         result = stripe_gateway.create_subscription_setup_intent(
             user_id=current_user.id,
             customer_name=current_user.name,
             customer_email=current_user.email,
-            plan_code=payload.plan_code.value,
-            price_minor=current_subscription.price_minor,
+            plan_code=plan_code.value,
+            price_minor=price_minor,
             currency=payload.currency,
             idempotency_key=payload.idempotency_key,
             metadata={
                 "user_id": current_user.id,
-                "plan_code": payload.plan_code.value,
-                "price_minor": current_subscription.price_minor,
+                "plan_code": plan_code.value,
+                "price_minor": price_minor,
                 "currency": payload.currency,
                 "idempotency_key": payload.idempotency_key,
             },
@@ -383,10 +395,21 @@ def _handle_stripe_subscription_event(
         or "GBP"
     ).upper()
 
+    if is_premium:
+        try:
+            plan_code = SubscriptionPlanCode(str(metadata.get("plan_code") or ""))
+        except ValueError:
+            # Metadata should always carry the plan_code set at setup-intent time — this
+            # fallback only guards against older subscriptions created before that metadata
+            # was populated.
+            plan_code = SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD
+    else:
+        plan_code = SubscriptionPlanCode.FREE
+
     billing_service.sync_subscription_for_user_id(
         user_id=user_id,
         payload=SubscriptionSyncInput(
-            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY if is_premium else SubscriptionPlanCode.FREE,
+            plan_code=plan_code,
             status=mapped_status,
             provider="stripe",
             price_minor=int(price.get("unit_amount") or metadata.get("price_minor") or 0),
@@ -419,11 +442,11 @@ def _handle_stripe_setup_intent_succeeded(
     if not user_id or not customer_id or not payment_method_id:
         return
 
-    plan_code_raw = str(metadata.get("plan_code") or SubscriptionPlanCode.PREMIUM_MONTHLY.value)
+    plan_code_raw = str(metadata.get("plan_code") or SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD.value)
     try:
         plan_code = SubscriptionPlanCode(plan_code_raw)
     except ValueError:
-        plan_code = SubscriptionPlanCode.PREMIUM_MONTHLY
+        plan_code = SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD
 
     price_minor = int(metadata.get("price_minor") or 900)
     currency = str(metadata.get("currency") or event_object.get("currency") or "GBP").upper()

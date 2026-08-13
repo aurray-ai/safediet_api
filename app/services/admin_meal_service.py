@@ -12,7 +12,9 @@ from app.schemas.admin_meal import (
     AdminMealBulkDeleteResponse,
     AdminMealCreateRequest,
     AdminMealEstimatedCostPayload,
+    AdminMealEstimatedCostSummary,
     AdminMealIngredientPayload,
+    AdminMealListItemResponse,
     AdminMealListResponse,
     AdminMealMetadataResponse,
     AdminMeasurementUnitOption,
@@ -159,7 +161,7 @@ class AdminMealService:
         meal_type: MealType | None = None,
         category_id: str | None = None,
     ) -> AdminMealListResponse:
-        meals, total = self._meal_repository.list_all_meals(
+        meals, total = self._meal_repository.list_all_meal_summaries(
             page=page,
             page_size=page_size,
             search=search,
@@ -167,7 +169,21 @@ class AdminMealService:
             category_id=category_id,
         )
         return AdminMealListResponse(
-            items=[self._to_response(meal) for meal in meals],
+            items=[
+                AdminMealListItemResponse(
+                    id=meal["id"],
+                    name=meal["name"],
+                    hero_image_url=meal["hero_image_url"],
+                    meal_type=meal["meal_type"],
+                    category_ids=meal["category_ids"],
+                    prep_time_minutes=meal["prep_time_minutes"],
+                    cook_time_minutes=meal["cook_time_minutes"],
+                    servings=meal["servings"],
+                    estimated_cost=self._to_estimated_cost_summary(meal.get("estimated_costs", [])),
+                    is_active=bool(meal.get("is_active", True)),
+                )
+                for meal in meals
+            ],
             total=total,
             page=page,
             page_size=page_size,
@@ -284,6 +300,19 @@ class AdminMealService:
             raise AdminMealValidationError(
                 "Link at least one ingredient to a real grocery product so the planner can ground the meal."
             )
+
+    @staticmethod
+    def _to_estimated_cost_summary(
+        estimated_costs: list[dict[str, object]],
+    ) -> AdminMealEstimatedCostSummary | None:
+        if not estimated_costs:
+            return None
+
+        primary_cost = estimated_costs[0]
+        return AdminMealEstimatedCostSummary(
+            currency_code=primary_cost["currency_code"],
+            amount=float(primary_cost["amount"]),
+        )
 
     @staticmethod
     def _payload_kwargs(

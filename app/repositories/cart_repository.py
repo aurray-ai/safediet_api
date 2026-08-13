@@ -113,6 +113,8 @@ class CartRepository:
                 source_meal_ids=[str(meal_id) for meal_id in list(item.get("source_meal_ids") or [])],
                 base_price_minor=int(item.get("base_price_minor") or item.get("current_unit_price_minor") or 0),
                 discount_percent_applied=float(item.get("discount_percent_applied") or 0.0),
+                member_price_minor=int(item.get("member_price_minor") or item.get("current_unit_price_minor") or 0),
+                member_discount_percent=float(item.get("member_discount_percent") or 0.0),
             )
             for item in list(document.get("items") or [])
         ]

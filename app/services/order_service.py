@@ -6,6 +6,7 @@ from app.models.order import Order, OrderStatus, SubstitutionResolution
 from app.models.user import User
 from app.repositories.grocery_repository import GroceryRepository
 from app.repositories.order_repository import OrderRepository
+from app.services.order_status_communication_service import OrderStatusCommunicationService
 from app.schemas.order import (
     OrderCancelResponse,
     OrderFulfillmentAssignmentHistoryResponse,
@@ -26,15 +27,64 @@ class OrderTransitionError(Exception):
     pass
 
 
+ALLOWED_ADMIN_ORDER_STATUS_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
+    OrderStatus.PENDING_PAYMENT: {
+        OrderStatus.PAYMENT_PROCESSING,
+        OrderStatus.CONFIRMED,
+        OrderStatus.CANCELED,
+        OrderStatus.PAYMENT_FAILED,
+    },
+    OrderStatus.PAYMENT_PROCESSING: {
+        OrderStatus.CONFIRMED,
+        OrderStatus.CANCELED,
+        OrderStatus.PAYMENT_FAILED,
+    },
+    OrderStatus.CONFIRMED: {
+        OrderStatus.PICKING,
+        OrderStatus.CANCELED,
+        OrderStatus.PARTIALLY_REFUNDED,
+        OrderStatus.REFUNDED,
+    },
+    OrderStatus.PICKING: {
+        OrderStatus.PACKED,
+        OrderStatus.CANCELED,
+        OrderStatus.PARTIALLY_REFUNDED,
+        OrderStatus.REFUNDED,
+    },
+    OrderStatus.PACKED: {
+        OrderStatus.OUT_FOR_DELIVERY,
+        OrderStatus.PARTIALLY_REFUNDED,
+        OrderStatus.REFUNDED,
+    },
+    OrderStatus.OUT_FOR_DELIVERY: {
+        OrderStatus.DELIVERED,
+        OrderStatus.PARTIALLY_REFUNDED,
+        OrderStatus.REFUNDED,
+    },
+    OrderStatus.DELIVERED: {
+        OrderStatus.PARTIALLY_REFUNDED,
+        OrderStatus.REFUNDED,
+    },
+    OrderStatus.PARTIALLY_REFUNDED: {
+        OrderStatus.REFUNDED,
+    },
+    OrderStatus.REFUNDED: set(),
+    OrderStatus.CANCELED: set(),
+    OrderStatus.PAYMENT_FAILED: set(),
+}
+
+
 class OrderService:
     def __init__(
         self,
         *,
         order_repository: OrderRepository,
         grocery_repository: GroceryRepository,
+        communication_service: OrderStatusCommunicationService | None = None,
     ) -> None:
         self._order_repository = order_repository
         self._grocery_repository = grocery_repository
+        self._communication_service = communication_service
 
     def list_user_orders(
         self,
@@ -93,15 +143,21 @@ class OrderService:
         self,
         *,
         status: str | None,
-        before: str | None,
-        limit: int,
+        page: int,
+        page_size: int,
     ) -> OrderListResponse:
-        items, next_cursor = self._order_repository.list_orders_admin(
-            status=status,
-            before=before,
-            limit=limit,
+        normalized_status = status.strip().lower() if status is not None else None
+        items, total = self._order_repository.list_orders_admin(
+            status=normalized_status,
+            page=page,
+            page_size=page_size,
         )
-        return OrderListResponse(items=[self._to_response(item) for item in items], next_cursor=next_cursor)
+        return OrderListResponse(
+            items=[self._to_response(item) for item in items],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
 
     def get_admin_order(self, *, order_id: str) -> OrderResponse:
         order = self._order_repository.get_order(order_id=order_id)
@@ -120,6 +176,7 @@ class OrderService:
         order = self._order_repository.get_order(order_id=order_id)
         if order is None:
             raise OrderNotFoundError
+        self._validate_admin_status_transition(current=order.status, target=status)
         updated = self._order_repository.update_status(
             order_id=order.id,
             status=status,
@@ -128,7 +185,26 @@ class OrderService:
         )
         if updated is None:
             raise OrderNotFoundError
+        if self._communication_service is not None:
+            self._communication_service.notify_customer_order_status_changed(
+                order=updated,
+                idempotency_key=f"order_status_customer:{updated.id}:{updated.status.value}:{updated.updated_at.isoformat()}",
+            )
         return self._to_response(updated)
+
+    @staticmethod
+    def _validate_admin_status_transition(*, current: OrderStatus, target: OrderStatus) -> None:
+        if current == target:
+            raise OrderTransitionError(f"Order is already marked as {current.value}.")
+
+        allowed_targets = ALLOWED_ADMIN_ORDER_STATUS_TRANSITIONS.get(current, set())
+        if target not in allowed_targets:
+            allowed_labels = ", ".join(option.value for option in sorted(allowed_targets, key=lambda item: item.value))
+            if allowed_labels:
+                raise OrderTransitionError(
+                    f"Cannot move order from {current.value} to {target.value}. Allowed next statuses: {allowed_labels}."
+                )
+            raise OrderTransitionError(f"Cannot move order from {current.value} to {target.value}.")
 
     def apply_substitution_decision(
         self,
