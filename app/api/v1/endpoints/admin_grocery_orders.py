@@ -21,7 +21,7 @@ from app.schemas.order import (
     RefundResponse,
 )
 from app.services.fulfillment_response_mappers import order_to_fulfillment_response
-from app.services.order_service import OrderNotFoundError, OrderService
+from app.services.order_service import OrderNotFoundError, OrderService, OrderTransitionError
 from app.services.refund_service import RefundError, RefundService
 from app.services.shopper_fulfillment_service import (
     FulfillmentNotFoundError,
@@ -35,12 +35,12 @@ router = APIRouter(prefix="/admin/grocery-orders", tags=["admin-grocery-orders"]
 @router.get("", response_model=OrderListResponse, status_code=status.HTTP_200_OK)
 def list_admin_orders(
     status_filter: str | None = Query(default=None, alias="status"),
-    before: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=50),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
     _: User = Depends(require_platform_user),
     order_service: OrderService = Depends(get_order_service),
 ) -> OrderListResponse:
-    return order_service.list_admin_orders(status=status_filter, before=before, limit=limit)
+    return order_service.list_admin_orders(status=status_filter, page=page, page_size=page_size)
 
 
 @router.get("/shoppers", response_model=WorkerListResponse, status_code=status.HTTP_200_OK)
@@ -133,6 +133,8 @@ def update_admin_order_status(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except OrderNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.") from exc
+    except OrderTransitionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/{order_id}/refunds", response_model=RefundResponse, status_code=status.HTTP_200_OK)

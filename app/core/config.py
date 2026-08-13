@@ -43,10 +43,17 @@ class Settings(BaseSettings):
     resend_api_key: SecretStr | None = None
     resend_api_base_url: str = "https://api.resend.com"
     resend_timeout_seconds: float = 10.0
+    unidays_api_key: SecretStr | None = None
+    unidays_api_base_url: str = "https://api.unidays.com"
+    unidays_webhook_secret: SecretStr | None = None
+    unidays_request_timeout_seconds: float = 15.0
+    student_verification_default_validity_days: int = 365
+    student_verification_expiry_nudge_days: int = 30
     email_from_address: str | None = None
     email_from_name: str = "Safediet"
     email_reply_to: str | None = None
     web_app_base_url: str = "http://localhost:3000"
+    mobile_app_link_base_url: str = "https://www.safediet.org"
     api_public_base_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -153,6 +160,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "web_app_base_url",
+        "mobile_app_link_base_url",
         "api_public_base_url",
         "cloudinary_api_base_url",
         mode="before",

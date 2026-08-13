@@ -38,6 +38,8 @@ class CartItem:
     source_meal_ids: list[str] = field(default_factory=list)
     base_price_minor: int = 0
     discount_percent_applied: float = 0.0
+    member_price_minor: int = 0
+    member_discount_percent: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

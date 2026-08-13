@@ -9,7 +9,9 @@ from app.repositories.grocery_repository import GroceryRepository
 from app.schemas.admin_grocery import (
     AdminGroceryBulkDeleteResponse,
     AdminCountryPricePayload,
+    AdminCountryPriceSummary,
     AdminGroceryProductCreateRequest,
+    AdminGroceryProductListItemResponse,
     AdminGroceryProductPayload,
     AdminGroceryProductResponse,
     AdminGroceryProductListResponse,
@@ -87,14 +89,29 @@ class AdminGroceryService:
         search: str | None = None,
         category_id: str | None = None,
     ) -> AdminGroceryProductListResponse:
-        products, total = self._grocery_repository.list_all_products(
+        products, total = self._grocery_repository.list_all_product_summaries(
             page=page,
             page_size=page_size,
             search=search,
             category_id=category_id,
         )
+        category_lookup = {
+            category.id: category.name
+            for category in self._grocery_repository.list_all_categories()
+        }
         return AdminGroceryProductListResponse(
-            items=[self._to_response(product) for product in products],
+            items=[
+                AdminGroceryProductListItemResponse(
+                    id=product["id"],
+                    category_id=product["category_id"],
+                    category_name=category_lookup.get(product["category_id"], product["category_id"]),
+                    img_url=product["img_url"],
+                    product=product["product"],
+                    price=self._to_price_summary(product.get("prices", [])),
+                    is_active=bool(product.get("is_active", True)),
+                )
+                for product in products
+            ],
             total=total,
             page=page,
             page_size=page_size,
@@ -229,6 +246,18 @@ class AdminGroceryService:
             "description": payload.description,
             "is_active": payload.is_active,
         }
+
+    @staticmethod
+    def _to_price_summary(prices: list[dict[str, object]]) -> AdminCountryPriceSummary | None:
+        if not prices:
+            return None
+
+        active_price = next((price for price in prices if bool(price.get("is_active", True))), prices[0])
+        return AdminCountryPriceSummary(
+            currency_code=active_price["currency_code"],
+            amount=float(active_price["amount"]),
+            price_unit=str(active_price["price_unit"]),
+        )
 
     @staticmethod
     def _to_response(product: GroceryProduct) -> AdminGroceryProductResponse:

@@ -37,6 +37,7 @@ from app.api.v1.endpoints.push_devices import router as push_devices_router
 from app.api.v1.endpoints.realtime import router as realtime_router
 from app.api.v1.endpoints.saved_meal_plans import router as saved_meal_plans_router
 from app.api.v1.endpoints.shopper_orders import router as shopper_orders_router
+from app.api.v1.endpoints.student_verification import router as student_verification_router
 from app.api.v1.endpoints.surveys import router as surveys_router
 from app.api.v1.endpoints.user_meal_usage import router as user_meal_usage_router
 from app.api.v1.endpoints.user_pantry import router as user_pantry_router
@@ -65,6 +66,7 @@ api_router.include_router(meal_planner_router, prefix=settings.api_v1_prefix)
 api_router.include_router(meal_planner_monitoring_router, prefix=settings.api_v1_prefix)
 api_router.include_router(saved_meal_plans_router, prefix=settings.api_v1_prefix)
 api_router.include_router(shopper_orders_router, prefix=settings.api_v1_prefix)
+api_router.include_router(student_verification_router, prefix=settings.api_v1_prefix)
 api_router.include_router(surveys_router, prefix=settings.api_v1_prefix)
 api_router.include_router(kitchen_router, prefix=settings.api_v1_prefix)
 api_router.include_router(user_meal_usage_router, prefix=settings.api_v1_prefix)

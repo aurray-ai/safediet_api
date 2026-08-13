@@ -67,13 +67,18 @@ def order_to_fulfillment_response(order: Order) -> GroceryOrderFulfillmentRespon
             GroceryOrderFulfillmentItemResponse(
                 id=item.id,
                 product_id=item.product_id,
+                category_id=item.category_id,
                 product_name=item.product_name,
                 img_url=item.img_url,
                 quantity=item.quantity,
                 unit_label=item.unit_label,
+                unit_weight_grams=item.unit_weight_grams,
                 unit_price_minor=item.unit_price_minor,
                 line_total_minor=item.line_total_minor,
                 currency=item.currency,
+                allow_substitutions=item.allow_substitutions,
+                substitution_resolution=item.substitution_resolution.value,
+                substituted_product_id=item.substituted_product_id,
                 source_meal_id=item.source_meal_id,
             )
             for item in order.items

@@ -34,6 +34,8 @@ class CartItemResponse(BaseModel):
     current_unit_price_minor: int
     base_price_minor: int = 0
     discount_percent_applied: float = 0.0
+    member_price_minor: int = 0
+    member_discount_percent: float = 0.0
     currency: str
     allow_substitutions: bool
     substitution_note: str
@@ -47,6 +49,9 @@ class CartItemResponse(BaseModel):
 class CartSummaryResponse(BaseModel):
     currency: str
     subtotal_minor: int
+    base_subtotal_minor: int = 0
+    member_subtotal_minor: int = 0
+    savings_minor: int = 0
     delivery_fee_minor: int
     service_fee_minor: int
     total_minor: int

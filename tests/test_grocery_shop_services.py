@@ -27,7 +27,9 @@ from app.services.billing_service import BillingService
 from app.services.cart_service import CartService, CartValidationError
 from app.services.checkout_service import CheckoutError, CheckoutService
 from app.services.delivery_window_service import DeliveryWindowService
+from app.services.email_service import EmailService, LoggingEmailSender
 from app.services.inventory_service import InventoryService
+from app.services.order_service import OrderService, OrderTransitionError
 from app.services.refund_service import RefundService
 
 
@@ -267,6 +269,16 @@ class FakeAddressRepository:
     def get_for_user(self, *, user_id: str, address_id: str):
         if self.address.user_id == user_id and self.address.id == address_id:
             return self.address
+        return None
+
+
+class FakeUserRepository:
+    def __init__(self, user: User) -> None:
+        self.user = user
+
+    def find_by_id(self, user_id: str):
+        if self.user.id == user_id:
+            return self.user
         return None
 
 
@@ -574,6 +586,14 @@ class FakeStripeGateway:
         )
 
 
+class FakeOrderStatusCommunicationService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    def notify_customer_order_status_changed(self, *, order: Order, idempotency_key: str) -> None:
+        self.calls.append((order.id, order.status.value, idempotency_key))
+
+
 class GroceryShopServicesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.user = User(
@@ -703,10 +723,16 @@ class GroceryShopServicesTests(unittest.TestCase):
             grocery_repository=self.grocery_repository,
             inventory_repository=self.inventory_repository,
             address_repository=self.address_repository,
+            user_repository=FakeUserRepository(self.user),
             inventory_service=self.inventory_service,
             billing_service=self.billing_service,
             stripe_gateway=self.stripe_gateway,
             delivery_window_service=DeliveryWindowService(),
+            email_service=EmailService(
+                sender=LoggingEmailSender(from_address="test@example.com", from_name="Test"),
+                web_app_base_url="http://test",
+                mobile_app_link_base_url="https://www.safediet.org",
+            ),
             default_store_id="main_store",
             default_currency="GBP",
             free_delivery_subtotal_minor=2000,
@@ -1035,6 +1061,117 @@ class GroceryShopServicesTests(unittest.TestCase):
         response = self.refund_service.list_refunds(current_user=self.user, order_id="order-1")
 
         self.assertEqual([item.id for item in response.items], ["refund-1"])
+
+
+class OrderServiceStatusTransitionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.product = GroceryProduct(
+            id="prod-1",
+            category_id="cat-1",
+            img_url="https://example.com/apple.jpg",
+            product="Apples",
+            sort_order=1,
+            product_tags=["fruit"],
+            culture_tags=[CultureTag.BRITISH],
+            nutritional_specs=[],
+            prices=[
+                CountryPrice(
+                    country_code=CountryCode.UNITED_KINGDOM,
+                    currency_code=CurrencyCode.POUND_STERLING,
+                    amount=3.50,
+                    price_unit="1kg bag",
+                    source="admin",
+                    updated_at=utc_now(),
+                    is_active=True,
+                )
+            ],
+            description="Fresh apples",
+            is_active=True,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        self.repository = FakeOrderRepository()
+        self.communication_service = FakeOrderStatusCommunicationService()
+        self.service = OrderService(
+            order_repository=self.repository,
+            grocery_repository=FakeGroceryRepository(self.product),
+            communication_service=self.communication_service,
+        )
+
+    def _create_order(self, *, status: OrderStatus) -> Order:
+        now = utc_now()
+        return self.repository.create_order(
+            order_number="GSO-123",
+            user_id="user-1",
+            store_id="store-1",
+            status=status,
+            currency="GBP",
+            items=[],
+            pricing_summary={
+                "currency": "GBP",
+                "subtotal_minor": 1200,
+                "delivery_fee_minor": 200,
+                "service_fee_minor": 100,
+                "total_minor": 1500,
+                "total_weight_grams": 1000,
+            },
+            address_snapshot={},
+            substitution_policy={},
+            payment_summary={
+                "currency": "GBP",
+                "wallet_amount_minor": 0,
+                "card_amount_minor": 1500,
+                "total_paid_minor": 1500,
+                "provider": "stripe",
+                "provider_payment_intent_id": "pi_test_123",
+            },
+            cancellation_window_expires_at=now + timedelta(hours=2),
+            status_history=[
+                {
+                    "status": status.value,
+                    "note": f"Order created as {status.value}.",
+                    "actor_user_id": None,
+                    "created_at": now,
+                }
+            ],
+            metadata={},
+        )
+
+    def test_admin_can_advance_to_allowed_next_status(self) -> None:
+        order = self._create_order(status=OrderStatus.CONFIRMED)
+
+        updated = self.service.advance_order_status(
+            order_id=order.id,
+            status=OrderStatus.PICKING,
+            note="Shopper has started picking.",
+            actor_user_id="admin-1",
+        )
+
+        self.assertEqual(updated.status, OrderStatus.PICKING.value)
+        self.assertEqual(len(self.communication_service.calls), 1)
+        self.assertEqual(self.communication_service.calls[0][1], OrderStatus.PICKING.value)
+
+    def test_admin_cannot_repeat_current_status(self) -> None:
+        order = self._create_order(status=OrderStatus.CONFIRMED)
+
+        with self.assertRaises(OrderTransitionError):
+            self.service.advance_order_status(
+                order_id=order.id,
+                status=OrderStatus.CONFIRMED,
+                note="Repeat status.",
+                actor_user_id="admin-1",
+            )
+
+    def test_admin_cannot_skip_to_delivered(self) -> None:
+        order = self._create_order(status=OrderStatus.CONFIRMED)
+
+        with self.assertRaises(OrderTransitionError):
+            self.service.advance_order_status(
+                order_id=order.id,
+                status=OrderStatus.DELIVERED,
+                note="Mark delivered early.",
+                actor_user_id="admin-1",
+            )
 
 
 if __name__ == "__main__":

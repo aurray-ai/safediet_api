@@ -282,7 +282,7 @@ class BillingServiceTests(unittest.TestCase):
         self.subscription_repo.items[self.user.id] = SubscriptionAccount(
             id=f"sub-{self.user.id}",
             user_id=self.user.id,
-            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY,
+            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD,
             status=SubscriptionStatus.CANCELED,
             provider="stripe",
             price_minor=900,
@@ -338,7 +338,7 @@ class BillingServiceTests(unittest.TestCase):
         response = self.service.sync_subscription(
             current_user=self.user,
             payload=SubscriptionSyncInput(
-                plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY,
+                plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD,
                 status=SubscriptionStatus.ACTIVE,
                 provider="stripe",
                 price_minor=900,
@@ -353,7 +353,7 @@ class BillingServiceTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(response.plan_code, SubscriptionPlanCode.PREMIUM_MONTHLY)
+        self.assertEqual(response.plan_code, SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD)
         self.assertTrue(response.is_premium)
         self.assertEqual(self.subscription_repo.items[self.user.id].latest_transaction_id, "latest-1")
         self.assertEqual(len(self.communication_service.started_calls), 1)
@@ -362,7 +362,7 @@ class BillingServiceTests(unittest.TestCase):
 
     def test_sync_subscription_does_not_renotify_on_repeated_active_sync(self) -> None:
         payload = SubscriptionSyncInput(
-            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY,
+            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD,
             status=SubscriptionStatus.ACTIVE,
             provider="stripe",
             price_minor=900,
@@ -385,7 +385,7 @@ class BillingServiceTests(unittest.TestCase):
         self.service.sync_subscription(
             current_user=self.user,
             payload=SubscriptionSyncInput(
-                plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY,
+                plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD,
                 status=SubscriptionStatus.ACTIVE,
                 provider="stripe",
                 price_minor=900,
@@ -486,7 +486,7 @@ class BillingServiceTests(unittest.TestCase):
     def test_list_payment_methods_returns_saved_stripe_card(self) -> None:
         self.subscription_repo.upsert_subscription(
             user_id=self.user.id,
-            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY,
+            plan_code=SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD,
             status=SubscriptionStatus.ACTIVE,
             provider="stripe",
             price_minor=900,

@@ -115,6 +115,8 @@ class StubInventoryService:
             base_price_minor=base_price_minor,
             unit_price_minor=base_price_minor,
             discount_percent_applied=0.0,
+            member_price_minor=base_price_minor,
+            member_discount_percent=0.0,
         )
 
     def resolve_weight_based_delivery_fee(

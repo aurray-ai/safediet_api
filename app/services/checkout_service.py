@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -7,7 +8,7 @@ from uuid import uuid4
 from app.models.billing import ChargeType, CheckoutPaymentMethod, CheckoutRoute
 from app.models.cart import CartItemPricingState, CartStatus
 from app.models.inventory import InventoryAdjustmentType
-from app.models.order import OrderStatus, PaymentAttemptStatus
+from app.models.order import Order, OrderStatus, PaymentAttemptStatus
 from app.models.user import User
 from app.repositories.address_repository import AddressRepository
 from app.repositories.cart_repository import CartRepository
@@ -16,6 +17,7 @@ from app.repositories.grocery_repository import GroceryRepository
 from app.repositories.inventory_repository import InventoryRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.payment_attempt_repository import PaymentAttemptRepository
+from app.repositories.user_repository import UserRepository
 from app.schemas.checkout import (
     CheckoutConfirmRequest,
     CheckoutConfirmResponse,
@@ -33,8 +35,11 @@ from app.services.delivery_window_service import (
     DeliveryWindowService,
     DeliveryWindowSpec,
 )
+from app.services.email_service import EmailService, OrderConfirmationEmailItem
 from app.services.inventory_service import InventoryService
 from app.services.stripe_billing_gateway import StripeBillingGateway
+
+logger = logging.getLogger(__name__)
 
 
 class CheckoutError(Exception):
@@ -78,10 +83,12 @@ class CheckoutService:
         grocery_repository: GroceryRepository,
         inventory_repository: InventoryRepository,
         address_repository: AddressRepository,
+        user_repository: UserRepository,
         inventory_service: InventoryService,
         billing_service: BillingService,
         stripe_gateway: StripeBillingGateway,
         delivery_window_service: DeliveryWindowService,
+        email_service: EmailService,
         default_store_id: str,
         default_currency: str,
         free_delivery_subtotal_minor: int,
@@ -97,10 +104,12 @@ class CheckoutService:
         self._grocery_repository = grocery_repository
         self._inventory_repository = inventory_repository
         self._address_repository = address_repository
+        self._user_repository = user_repository
         self._inventory_service = inventory_service
         self._billing_service = billing_service
         self._stripe_gateway = stripe_gateway
         self._delivery_window_service = delivery_window_service
+        self._email_service = email_service
         self._default_store_id = default_store_id
         self._default_currency = default_currency
         self._free_delivery_subtotal_minor = max(0, int(free_delivery_subtotal_minor))
@@ -545,6 +554,59 @@ class CheckoutService:
             note="Payment succeeded and inventory captured.",
             actor_user_id=order.user_id,
         )
+        self._send_order_confirmation_email(order=order)
+
+    def _send_order_confirmation_email(self, *, order: Order) -> None:
+        user = self._user_repository.find_by_id(order.user_id)
+        if user is None:
+            return
+        try:
+            self._email_service.send_grocery_order_confirmation_email(
+                user=user,
+                order_id=order.id,
+                order_number=order.order_number,
+                items=[
+                    OrderConfirmationEmailItem(
+                        product_name=item.product_name,
+                        image_url=item.img_url,
+                        quantity=item.quantity,
+                        unit_label=item.unit_label,
+                        line_total_label=self._format_money(item.line_total_minor, order.currency),
+                    )
+                    for item in order.items
+                ],
+                subtotal_label=self._format_money(order.pricing_summary.subtotal_minor, order.currency),
+                delivery_fee_label=self._format_money(order.pricing_summary.delivery_fee_minor, order.currency),
+                service_fee_label=self._format_money(order.pricing_summary.service_fee_minor, order.currency),
+                total_label=self._format_money(order.pricing_summary.total_minor, order.currency),
+                delivery_address_label=self._format_address_label(order.address_snapshot),
+            )
+        except Exception:
+            logger.exception(
+                "checkout.order_confirmation_email_failed order_id=%s user_id=%s",
+                order.id,
+                order.user_id,
+            )
+
+    @staticmethod
+    def _format_money(amount_minor: int, currency: str) -> str:
+        major = amount_minor / 100
+        symbol = "£" if currency.upper() == "GBP" else "$" if currency.upper() == "USD" else f"{currency.upper()} "
+        return f"{symbol}{major:,.2f}"
+
+    @staticmethod
+    def _format_address_label(snapshot: dict[str, Any]) -> str:
+        label = str(snapshot.get("label") or "Delivery address")
+        address_parts = [
+            str(snapshot.get("line1") or ""),
+            str(snapshot.get("line2") or ""),
+            str(snapshot.get("city") or ""),
+            str(snapshot.get("state") or ""),
+            str(snapshot.get("postal_code") or ""),
+            str(snapshot.get("country") or ""),
+        ]
+        address_line = ", ".join(part for part in address_parts if part)
+        return f"{label}\n{address_line}" if address_line else label
 
     @staticmethod
     def _build_order_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

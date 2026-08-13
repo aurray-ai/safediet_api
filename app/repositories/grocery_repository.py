@@ -285,6 +285,55 @@ class GroceryRepository:
         )
         return [self._to_product_model(document) for document in documents], total
 
+    def list_all_product_summaries(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        category_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        query: dict[str, Any] = {}
+
+        if search:
+            normalized_search = search.strip()
+            query["$or"] = [
+                {"product": {"$regex": normalized_search, "$options": "i"}},
+                {"product_tags": {"$regex": normalized_search, "$options": "i"}},
+            ]
+
+        if category_id:
+            query["category_id"] = category_id
+
+        total = self._products.count_documents(query)
+        documents = (
+            self._products.find(
+                query,
+                {
+                    "_id": 1,
+                    "category_id": 1,
+                    "img_url": 1,
+                    "product": 1,
+                    "prices": 1,
+                    "is_active": 1,
+                },
+            )
+            .sort([("sort_order", ASCENDING), ("product", ASCENDING)])
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return [
+            {
+                "id": str(document["_id"]),
+                "category_id": str(document["category_id"]),
+                "img_url": str(document.get("img_url", "")),
+                "product": str(document["product"]),
+                "prices": list(document.get("prices", [])),
+                "is_active": bool(document.get("is_active", True)),
+            }
+            for document in documents
+        ], total
+
     def create_product(
         self,
         *,

@@ -6,7 +6,22 @@ from typing import Any
 
 class SubscriptionPlanCode(StrEnum):
     FREE = "free"
-    PREMIUM_MONTHLY = "premium_monthly"
+    PREMIUM_MONTHLY_STUDENT = "premium_monthly_student"
+    PREMIUM_MONTHLY_STANDARD = "premium_monthly_standard"
+
+
+# Source of truth for what each paid tier costs. Both the Stripe checkout path and the
+# eligible-plan resolution read from here so the price can never drift between the two.
+PLAN_PRICE_MINOR: dict[SubscriptionPlanCode, int] = {
+    SubscriptionPlanCode.PREMIUM_MONTHLY_STUDENT: 799,
+    SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD: 1599,
+}
+
+PLAN_DISPLAY_NAME: dict[SubscriptionPlanCode, str] = {
+    SubscriptionPlanCode.FREE: "Safediet Free",
+    SubscriptionPlanCode.PREMIUM_MONTHLY_STUDENT: "Safediet Plus (Student)",
+    SubscriptionPlanCode.PREMIUM_MONTHLY_STANDARD: "Safediet Plus",
+}
 
 
 class SubscriptionStatus(StrEnum):
